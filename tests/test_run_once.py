@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -197,6 +198,81 @@ def test_cli_run_once_prints_run_id_and_status(tmp_path: Path, tiny_repo: dict[s
     _assert_canonical_clean(tiny_repo["repo"])
 
 
+@pytest.mark.parametrize("location", ["conftest.py", "tests/conftest.py"])
+def test_agent_added_conftest_cannot_force_pass(tmp_path: Path, tiny_repo: dict[str, Path | str], location: str) -> None:
+    repo = Path(tiny_repo["repo"])
+    (repo / "tests").mkdir(exist_ok=True)
+    _run(["git", "add", "tests"], repo)
+    agent = _agent(tmp_path, f"p = Path({location!r}); p.parent.mkdir(exist_ok=True); p.write_text('import pytest\\ndef pytest_runtest_setup(item):\\n    pytest.skip(\"forced\")\\n')")
+    result, row = _run_forge(tmp_path, tiny_repo, agent)
+    assert result.status == "failed"
+    assert location in json.loads(row["protected_paths_modified"])
+    _assert_canonical_clean(repo)
+
+
+@pytest.mark.parametrize("name", ["pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml"])
+def test_agent_config_edit_cannot_change_grading(tmp_path: Path, tiny_repo: dict[str, Path | str], name: str) -> None:
+    repo = Path(tiny_repo["repo"])
+    (repo / name).write_text("[pytest]\naddopts = -q\n" if name != "pyproject.toml" else "[tool.pytest.ini_options]\naddopts = '-q'\n")
+    _run(["git", "add", name], repo)
+    _run(["git", "commit", "-m", "add pytest config"], repo)
+    tiny_repo["base_commit"] = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    edited = "[tool.pytest.ini_options]\naddopts = '--ignore=test_calc.py'\n" if name == "pyproject.toml" else "[pytest]\naddopts = --ignore=test_calc.py\n"
+    agent = _agent(tmp_path, f"Path({name!r}).write_text({edited!r})")
+    result, row = _run_forge(tmp_path, tiny_repo, agent)
+    assert result.status == "failed"
+    assert name in json.loads(row["protected_paths_modified"])
+    _assert_canonical_clean(repo)
+
+
+def test_agent_added_shadow_test_is_removed(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    agent = _agent(tmp_path, "Path('test_calc.py').rename('old_test.py')\nPath('tests').mkdir()\nPath('tests/test_calc.py').write_text('def test_fake(): assert True\\n')")
+    result, row = _run_forge(tmp_path, tiny_repo, agent)
+    assert result.status == "failed"
+    assert "test_calc.py" in json.loads(row["protected_paths_modified"])
+    assert "tests/test_calc.py" in json.loads(row["protected_paths_modified"])
+    _assert_canonical_clean(tiny_repo["repo"])
+
+
+@pytest.mark.parametrize("action", ["symlink", "directory"])
+def test_protected_path_replacement_is_restored(tmp_path: Path, tiny_repo: dict[str, Path | str], action: str) -> None:
+    repo = Path(tiny_repo["repo"])
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_calc.py").write_text((repo / "test_calc.py").read_text())
+    (repo / "test_calc.py").unlink()
+    _run(["git", "add", "-A"], repo)
+    _run(["git", "commit", "-m", "move protected test"], repo)
+    tiny_repo["base_commit"] = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    body = "Path('tests/test_calc.py').unlink(); Path('tests/test_calc.py').symlink_to('missing.py')" if action == "symlink" else "import shutil; shutil.rmtree('tests')"
+    agent = _agent(tmp_path, body)
+    result, row = _run_forge(tmp_path, tiny_repo, agent, grader_paths=["tests"])
+    assert result.status == "failed"
+    assert "tests" in json.loads(row["protected_paths_modified"])
+    _assert_canonical_clean(repo)
+
+
+def test_clone_does_not_change_canonical_git_objects_or_refs(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    repo = Path(tiny_repo["repo"])
+    before = _git_fingerprint(repo)
+    agent = _agent(tmp_path, "import subprocess\nfor args in [['branch', 'agent-branch'], ['add', 'calc.py'], ['commit', '-m', 'agent'], ['update-ref', 'refs/heads/agent-ref', 'HEAD'], ['gc']]: subprocess.run(['git', *args], check=True, stdout=subprocess.DEVNULL)")
+    result, _ = _run_forge(tmp_path, tiny_repo, agent)
+    assert result.status == "failed"
+    assert _git_fingerprint(repo) == before
+    _assert_canonical_clean(repo)
+
+
+@pytest.mark.parametrize("sleep_s", [0, 5])
+def test_agent_background_child_is_killed(tmp_path: Path, tiny_repo: dict[str, Path | str], sleep_s: int) -> None:
+    marker = tmp_path / "child-survived"
+    child_code = f"import time; from pathlib import Path; time.sleep(1); Path({str(marker)!r}).write_text('alive')"
+    agent = _agent(tmp_path, f"import subprocess, time\nsubprocess.Popen([{sys.executable!r}, '-c', {child_code!r}])\ntime.sleep({sleep_s})")
+    result, _ = _run_forge(tmp_path, tiny_repo, agent, agent_timeout_s=0.3 if sleep_s else 3)
+    assert result.status == ("agent_timeout" if sleep_s else "failed")
+    time.sleep(1.2)
+    assert not marker.exists()
+    _assert_canonical_clean(tiny_repo["repo"])
+
+
 def _run_forge(
     tmp_path: Path,
     tiny_repo: dict[str, Path | str],
@@ -207,6 +283,7 @@ def _run_forge(
     agent_timeout_s: float = 3,
     grader_timeout_s: float = 3,
     grader_cmd: list[str] | None = None,
+    grader_paths: list[str] | None = None,
     trial: int = 1,
 ) -> tuple[object, sqlite3.Row]:
     task = _task_file(
@@ -216,6 +293,7 @@ def _run_forge(
         agent_timeout_s=agent_timeout_s,
         grader_timeout_s=grader_timeout_s,
         grader_cmd=grader_cmd,
+        grader_paths=grader_paths,
     )
     db_path = db or (tmp_path / "runs.sqlite")
     result = run_once(
@@ -246,6 +324,7 @@ def _task_file(
     agent_timeout_s: float = 3,
     grader_timeout_s: float = 3,
     grader_cmd: list[str] | None = None,
+    grader_paths: list[str] | None = None,
 ) -> Path:
     command = grader_cmd or [sys.executable, "-m", "pytest", "-q"]
     task = tmp_path / f"task-{len(list(tmp_path.glob('task-*.toml')))}.toml"
@@ -258,7 +337,7 @@ def _task_file(
             base_commit = {base_commit or str(tiny_repo["base_commit"])!r}
             agent_prompt = "Fix add_one."
             grader_cmd = {command!r}
-            grader_paths = ["test_calc.py"]
+            grader_paths = {grader_paths or ['test_calc.py']!r}
             agent_timeout_s = {agent_timeout_s}
             grader_timeout_s = {grader_timeout_s}
             """
@@ -294,3 +373,11 @@ def _assert_canonical_clean(repo: object) -> None:
     worktrees = _run(["git", "worktree", "list", "--porcelain"], repo_path).stdout
     assert status == ""
     assert worktrees.count("worktree ") == 1
+
+
+def _git_fingerprint(repo: Path) -> tuple[str, str, int]:
+    refs = _run(["git", "for-each-ref", "--format=%(refname) %(objectname)"], repo).stdout
+    head = _run(["git", "rev-parse", "HEAD"], repo).stdout
+    objects = list((repo / ".git" / "objects").rglob("*"))
+    return refs, head, len([path for path in objects if path.is_file()])
+
