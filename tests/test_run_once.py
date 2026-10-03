@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import textwrap
 
 import pytest
@@ -39,7 +40,7 @@ def tiny_repo(tmp_path: Path) -> dict[str, Path | str]:
     return {"repo": repo, "base_commit": base_commit}
 
 
-def test_agent_fixes_bug_records_pass_and_cleans_worktree(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+def test_agent_fixes_bug_records_pass_and_cleans_clone(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     agent = _agent(tmp_path, "Path('calc.py').write_text('def add_one(value):\\n    return value + 1\\n')")
     result, row = _run_forge(tmp_path, tiny_repo, agent)
 
@@ -71,7 +72,7 @@ def test_agent_cannot_hide_failure_by_deleting_protected_test(tmp_path: Path, ti
     _assert_canonical_clean(tiny_repo["repo"])
 
 
-def test_agent_timeout_is_recorded_and_cleaned(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+def test_agent_timeout_is_recorded_and_cleans_clone(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     agent = _agent(tmp_path, "import time\ntime.sleep(5)")
     result, row = _run_forge(tmp_path, tiny_repo, agent, agent_timeout_s=0.2)
 
@@ -200,6 +201,7 @@ def test_cli_run_once_prints_run_id_and_status(tmp_path: Path, tiny_repo: dict[s
     db = tmp_path / "cli.sqlite"
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+    clones_before = _clone_roots()
 
     result = subprocess.run(
         [
@@ -233,6 +235,7 @@ def test_cli_run_once_prints_run_id_and_status(tmp_path: Path, tiny_repo: dict[s
     run_id, status = result.stdout.strip().split()
     assert len(run_id) == 36
     assert status == "passed"
+    assert _clone_roots() == clones_before
     _assert_canonical_clean(tiny_repo["repo"])
 
 
@@ -362,6 +365,7 @@ def _run_forge(
     trial: int = 1,
 ) -> tuple[object, sqlite3.Row]:
     before = _git_fingerprint(Path(tiny_repo["repo"]))
+    clones_before = _clone_roots()
     task = _task_file(
         tmp_path,
         tiny_repo,
@@ -390,6 +394,7 @@ def _run_forge(
             (result.run_id,),
         ).fetchone()
     assert _git_fingerprint(Path(tiny_repo["repo"])) == before
+    assert _clone_roots() == clones_before
     return result, row
 
 
@@ -457,3 +462,7 @@ def _git_fingerprint(repo: Path) -> tuple[str, str, int]:
     head = _run(["git", "rev-parse", "HEAD"], repo).stdout
     objects = list((repo / ".git" / "objects").rglob("*"))
     return refs, head, len([path for path in objects if path.is_file()])
+
+
+def _clone_roots() -> set[Path]:
+    return set(Path(tempfile.gettempdir()).glob("forge-clone-*"))
