@@ -8,10 +8,11 @@ import tempfile
 import uuid
 
 from forge import __version__
+from forge.checkout import CheckoutError, disposable_clone
 from forge.db import RunRecord, insert_run
+from forge.integrity import restore_protected_paths, uses_pytest
 from forge.process import ProcessResult, allowed_environment, run_command
 from forge.task import InvalidConfigError, TaskDefinition, load_task
-from forge.worktree import WorktreeError, disposable_worktree, protected_paths_modified, restore_paths
 
 
 VALID_CONDITIONS = {"baseline", "skill"}
@@ -54,7 +55,7 @@ def run_once(request: RunOnceRequest) -> RunOnceResult:
 
     try:
         task = load_task(request.task_path)
-        with disposable_worktree(task.repo_path, task.base_commit) as worktree:
+        with disposable_clone(task.repo_path, task.base_commit) as worktree:
             agent_env = allowed_environment(logs / "agent-home", {"FORGE_AGENT_PROMPT": task.agent_prompt})
             agent_result = run_command(
                 request.agent_cmd,
@@ -64,8 +65,7 @@ def run_once(request: RunOnceRequest) -> RunOnceResult:
                 stderr_path,
                 agent_env,
             )
-            changed_paths = protected_paths_modified(worktree, task.grader_paths)
-            restore_paths(worktree, task.base_commit, task.grader_paths)
+            changed_paths = restore_protected_paths(worktree, task.base_commit, task.grader_paths, uses_pytest(task.grader_cmd))
             grader_env = allowed_environment(logs / "grader-home")
             grader_result = run_command(
                 task.grader_cmd,
@@ -78,7 +78,7 @@ def run_once(request: RunOnceRequest) -> RunOnceResult:
             status = _classify(agent_result, grader_result)
     except InvalidConfigError:
         status = "invalid_config"
-    except WorktreeError:
+    except CheckoutError:
         status = "infra_error"
     except Exception:
         status = "infra_error"

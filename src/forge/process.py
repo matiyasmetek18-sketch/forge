@@ -50,9 +50,10 @@ def run_command(
         )
         try:
             exit_code = proc.wait(timeout=timeout_s)
+            _kill_process_group(proc.pid, signal.SIGKILL)
             return ProcessResult(exit_code, False, stdout_path, stderr_path)
         except subprocess.TimeoutExpired:
-            _kill_process_group(proc.pid)
+            _kill_process_group(proc.pid, signal.SIGKILL)
             try:
                 proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
