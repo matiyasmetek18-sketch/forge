@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import time
@@ -11,6 +12,9 @@ import textwrap
 
 import pytest
 
+import forge.checkout as checkout_module
+import forge.db as db_module
+import forge.runner as runner_module
 from forge.runner import RunOnceRequest, run_once
 
 
@@ -113,6 +117,15 @@ def test_grader_crash_and_timeout_are_grader_error(tmp_path: Path, tiny_repo: di
     _assert_canonical_clean(tiny_repo["repo"])
 
 
+@pytest.mark.parametrize("code", [2, 5, 7])
+def test_grader_other_exit_codes_are_errors(tmp_path: Path, tiny_repo: dict[str, Path | str], code: int) -> None:
+    agent = _agent(tmp_path, "pass")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, grader_cmd=[sys.executable, "-c", f"raise SystemExit({code})"])
+    assert result.status == "grader_error"
+    assert row["grader_exit_code"] == code
+    _assert_canonical_clean(tiny_repo["repo"])
+
+
 def test_invalid_task_toml_and_bad_commit_are_invalid_config(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     missing = tmp_path / "missing.toml"
     missing.write_text("task_id = 'bad'\n", encoding="utf-8")
@@ -136,6 +149,16 @@ def test_invalid_task_toml_and_bad_commit_are_invalid_config(tmp_path: Path, tin
     _assert_canonical_clean(tiny_repo["repo"])
 
 
+def test_malformed_toml_is_invalid_config(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    malformed = tmp_path / "malformed.toml"
+    malformed.write_text("task_id = [\n")
+    result = run_once(RunOnceRequest(malformed, "baseline", 1, 99, "exp", tmp_path / "malformed.sqlite", [sys.executable, "-c", "pass"]))
+    with sqlite3.connect(tmp_path / "malformed.sqlite") as conn:
+        assert conn.execute("SELECT status FROM runs").fetchall() == [("invalid_config",)]
+    assert result.status == "invalid_config"
+    _assert_canonical_clean(tiny_repo["repo"])
+
+
 def test_schema_idempotent_and_fields_round_trip(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     db = tmp_path / "runs.sqlite"
     agent = _agent(tmp_path, "pass")
@@ -153,6 +176,21 @@ def test_schema_idempotent_and_fields_round_trip(tmp_path: Path, tiny_repo: dict
     assert row["trial"] == 2
     assert row["seed"] == 99
     assert json.loads(row["agent_cmd"])[0] == sys.executable
+    assert row["run_id"] == second.run_id
+    assert row["experiment_id"] == "exp"
+    assert row["task_id"] == "tiny"
+    assert row["task_version"] == "1"
+    assert row["base_commit"] == tiny_repo["base_commit"]
+    assert row["status"] == "failed"
+    assert row["agent_exit_code"] == 0
+    assert row["grader_exit_code"] == 1
+    assert json.loads(row["protected_paths_modified"]) == []
+    assert row["start_time"] <= row["end_time"]
+    assert Path(row["stdout_path"]).exists()
+    assert Path(row["stderr_path"]).exists()
+    assert row["forge_version"]
+    assert not hasattr(db_module, "update_run")
+    assert not hasattr(db_module, "delete_run")
     _assert_canonical_clean(tiny_repo["repo"])
 
 
@@ -201,10 +239,16 @@ def test_cli_run_once_prints_run_id_and_status(tmp_path: Path, tiny_repo: dict[s
 @pytest.mark.parametrize("location", ["conftest.py", "tests/conftest.py"])
 def test_agent_added_conftest_cannot_force_pass(tmp_path: Path, tiny_repo: dict[str, Path | str], location: str) -> None:
     repo = Path(tiny_repo["repo"])
-    (repo / "tests").mkdir(exist_ok=True)
-    _run(["git", "add", "tests"], repo)
+    grader_paths = ["test_calc.py"]
+    if location.startswith("tests/"):
+        (repo / "tests").mkdir()
+        (repo / "test_calc.py").rename(repo / "tests" / "test_calc.py")
+        _run(["git", "add", "-A"], repo)
+        _run(["git", "commit", "-m", "move test into tests directory"], repo)
+        tiny_repo["base_commit"] = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+        grader_paths = ["tests/test_calc.py"]
     agent = _agent(tmp_path, f"p = Path({location!r}); p.parent.mkdir(exist_ok=True); p.write_text('import pytest\\ndef pytest_runtest_setup(item):\\n    pytest.skip(\"forced\")\\n')")
-    result, row = _run_forge(tmp_path, tiny_repo, agent)
+    result, row = _run_forge(tmp_path, tiny_repo, agent, grader_paths=grader_paths)
     assert result.status == "failed"
     assert location in json.loads(row["protected_paths_modified"])
     _assert_canonical_clean(repo)
@@ -254,11 +298,30 @@ def test_protected_path_replacement_is_restored(tmp_path: Path, tiny_repo: dict[
 def test_clone_does_not_change_canonical_git_objects_or_refs(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     repo = Path(tiny_repo["repo"])
     before = _git_fingerprint(repo)
-    agent = _agent(tmp_path, "import subprocess\nfor args in [['branch', 'agent-branch'], ['add', 'calc.py'], ['commit', '-m', 'agent'], ['update-ref', 'refs/heads/agent-ref', 'HEAD'], ['gc']]: subprocess.run(['git', *args], check=True, stdout=subprocess.DEVNULL)")
+    agent = _agent(tmp_path, "import subprocess\nfor args in [['branch', 'agent-branch'], ['add', 'calc.py'], ['-c', 'user.name=Forge', '-c', 'user.email=forge@example.test', 'commit', '--allow-empty', '-m', 'agent'], ['update-ref', 'refs/heads/agent-ref', 'HEAD'], ['gc']]: subprocess.run(['git', *args], check=True, stdout=subprocess.DEVNULL)")
     result, _ = _run_forge(tmp_path, tiny_repo, agent)
     assert result.status == "failed"
     assert _git_fingerprint(repo) == before
     _assert_canonical_clean(repo)
+
+
+def test_disposable_clone_is_removed(tmp_path: Path, tiny_repo: dict[str, Path | str], monkeypatch: pytest.MonkeyPatch) -> None:
+    roots: list[Path] = []
+    original = checkout_module.disposable_clone
+
+    @contextmanager
+    def tracked_clone(repo: Path, commit: str):
+        with original(repo, commit) as clone:
+            roots.append(clone.parent)
+            yield clone
+
+    monkeypatch.setattr(runner_module, "disposable_clone", tracked_clone)
+    agent = _agent(tmp_path, "pass")
+    result, _ = _run_forge(tmp_path, tiny_repo, agent)
+    assert result.status == "failed"
+    assert len(roots) == 1
+    assert not roots[0].exists()
+    _assert_canonical_clean(tiny_repo["repo"])
 
 
 @pytest.mark.parametrize("sleep_s", [0, 5])
@@ -268,6 +331,18 @@ def test_agent_background_child_is_killed(tmp_path: Path, tiny_repo: dict[str, P
     agent = _agent(tmp_path, f"import subprocess, time\nsubprocess.Popen([{sys.executable!r}, '-c', {child_code!r}])\ntime.sleep({sleep_s})")
     result, _ = _run_forge(tmp_path, tiny_repo, agent, agent_timeout_s=0.3 if sleep_s else 3)
     assert result.status == ("agent_timeout" if sleep_s else "failed")
+    time.sleep(1.2)
+    assert not marker.exists()
+    _assert_canonical_clean(tiny_repo["repo"])
+
+
+@pytest.mark.xfail(strict=True, reason="A child that creates a new session escapes POSIX process-group cleanup")
+def test_agent_detached_child_is_killed(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    marker = tmp_path / "detached-child-survived"
+    child_code = f"import time; from pathlib import Path; time.sleep(1); Path({str(marker)!r}).write_text('alive')"
+    agent = _agent(tmp_path, f"import subprocess\nsubprocess.Popen([{sys.executable!r}, '-c', {child_code!r}], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)")
+    result, _ = _run_forge(tmp_path, tiny_repo, agent)
+    assert result.status == "failed"
     time.sleep(1.2)
     assert not marker.exists()
     _assert_canonical_clean(tiny_repo["repo"])
@@ -286,6 +361,7 @@ def _run_forge(
     grader_paths: list[str] | None = None,
     trial: int = 1,
 ) -> tuple[object, sqlite3.Row]:
+    before = _git_fingerprint(Path(tiny_repo["repo"]))
     task = _task_file(
         tmp_path,
         tiny_repo,
@@ -313,6 +389,7 @@ def _run_forge(
             "SELECT * FROM runs WHERE run_id = ?",
             (result.run_id,),
         ).fetchone()
+    assert _git_fingerprint(Path(tiny_repo["repo"])) == before
     return result, row
 
 
@@ -380,4 +457,3 @@ def _git_fingerprint(repo: Path) -> tuple[str, str, int]:
     head = _run(["git", "rev-parse", "HEAD"], repo).stdout
     objects = list((repo / ".git" / "objects").rglob("*"))
     return refs, head, len([path for path in objects if path.is_file()])
-
