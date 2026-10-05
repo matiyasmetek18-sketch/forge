@@ -8,9 +8,9 @@ import tempfile
 import uuid
 
 from forge import __version__
-from forge.checkout import CheckoutError, disposable_clone
+from forge.checkout import CheckoutError, disposable_snapshot
 from forge.db import RunRecord, insert_run
-from forge.integrity import restore_protected_paths, uses_pytest
+from forge.integrity import restore_protected_paths, uses_pytest, uses_unittest
 from forge.process import ProcessResult, allowed_environment, run_command
 from forge.task import InvalidConfigError, TaskDefinition, load_task
 
@@ -55,21 +55,24 @@ def run_once(request: RunOnceRequest) -> RunOnceResult:
 
     try:
         task = load_task(request.task_path)
-        with disposable_clone(task.repo_path, task.base_commit) as worktree:
+        with disposable_snapshot(task.repo_path, task.base_commit) as (checkout, snapshot_commit):
             agent_env = allowed_environment(logs / "agent-home", {"FORGE_AGENT_PROMPT": task.agent_prompt})
             agent_result = run_command(
                 request.agent_cmd,
-                worktree,
+                checkout,
                 task.agent_timeout_s,
                 stdout_path,
                 stderr_path,
                 agent_env,
             )
-            changed_paths = restore_protected_paths(worktree, task.base_commit, task.grader_paths, uses_pytest(task.grader_cmd))
+            changed_paths = restore_protected_paths(
+                checkout, snapshot_commit, task.grader_paths,
+                uses_pytest(task.grader_cmd), uses_unittest(task.grader_cmd),
+            )
             grader_env = allowed_environment(logs / "grader-home")
             grader_result = run_command(
                 task.grader_cmd,
-                worktree,
+                checkout,
                 task.grader_timeout_s,
                 logs / "grader.stdout",
                 logs / "grader.stderr",

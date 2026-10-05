@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 from forge.checkout import CheckoutError
 
@@ -15,12 +16,21 @@ def uses_pytest(command: list[str]) -> bool:
     return any(Path(arg).name in {"pytest", "py.test"} for arg in command)
 
 
-def restore_protected_paths(checkout: Path, commit: str, grader_paths: list[str], pytest_style: bool) -> list[str]:
+def uses_unittest(command: list[str]) -> bool:
+    return any(Path(arg).name == "unittest" for arg in command)
+
+
+def restore_protected_paths(
+    checkout: Path, commit: str, grader_paths: list[str], pytest_style: bool, unittest_style: bool = False,
+) -> list[str]:
     base = _base_files(checkout, commit)
     actual = _actual_files(checkout)
     automatic = set()
-    if pytest_style:
-        automatic = {path for path in base.keys() | actual if _pytest_protected(path)}
+    if pytest_style or unittest_style:
+        automatic = {
+            path for path in base.keys() | actual
+            if _python_grader_protected(path, pytest_style, unittest_style)
+        }
 
     explicit = list(dict.fromkeys(grader_paths))
     automatic = {path for path in automatic if not any(_within(path, rel) for rel in explicit)}
@@ -42,9 +52,15 @@ def restore_protected_paths(checkout: Path, commit: str, grader_paths: list[str]
     return changed
 
 
-def _pytest_protected(rel: str) -> bool:
+def _python_grader_protected(rel: str, pytest_style: bool, unittest_style: bool) -> bool:
     name = Path(rel).name
-    return name in PYTEST_CONTROL_FILES or (name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")))
+    if name in {"sitecustomize.py", "usercustomize.py"}:
+        return True
+    if name.endswith(".py") and name[:-3] in sys.stdlib_module_names:
+        return True
+    if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
+        return True
+    return (pytest_style and name in PYTEST_CONTROL_FILES) or (unittest_style and name.startswith("test") and name.endswith(".py"))
 
 
 def _within(path: str, parent: str) -> bool:
