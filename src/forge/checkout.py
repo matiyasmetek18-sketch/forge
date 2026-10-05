@@ -14,7 +14,7 @@ class CheckoutError(Exception):
 
 
 @contextmanager
-def disposable_snapshot(repo_path: Path, base_commit: str) -> Iterator[tuple[Path, str]]:
+def disposable_snapshot(repo_path: Path, base_commit: str) -> Iterator[tuple[Path, str, str]]:
     root = Path(tempfile.mkdtemp(prefix="forge-snapshot-"))
     checkout = root / "checkout"
     checkout.mkdir()
@@ -41,9 +41,12 @@ def disposable_snapshot(repo_path: Path, base_commit: str) -> Iterator[tuple[Pat
             _git(checkout, ["update-index", "--add", "--cacheinfo", mode, new_oid, rel], env)
 
         tree = _git(checkout, ["write-tree"], env).decode("ascii").strip()
+        base_tree = _git(repo_path, ["rev-parse", f"{base_commit}^{{tree}}"], env).decode("ascii").strip()
+        if tree != base_tree:
+            raise CheckoutError("exported snapshot tree differs from base_commit")
         snapshot_commit = _git(checkout, ["commit-tree", tree, "-m", "Forge task snapshot"], env).decode("ascii").strip()
         _git(checkout, ["update-ref", "refs/heads/main", snapshot_commit], env)
-        yield checkout, snapshot_commit
+        yield checkout, snapshot_commit, tree
     except subprocess.CalledProcessError as exc:
         raise CheckoutError(exc.stderr.decode(errors="replace").strip() or "Git snapshot setup failed") from exc
     finally:

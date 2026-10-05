@@ -17,6 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--seed", type=int, required=True)
     run_parser.add_argument("--experiment-id", required=True)
     run_parser.add_argument("--db", required=True)
+    run_parser.add_argument("--skill")
     run_parser.add_argument("--agent-cmd", nargs="+", required=True)
 
     args = parser.parse_args(argv)
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
                 experiment_id=args.experiment_id,
                 db_path=Path(args.db),
                 agent_cmd=args.agent_cmd,
+                skill_path=Path(args.skill) if args.skill is not None else None,
             )
         )
         print(f"{result.run_id} {result.status}")

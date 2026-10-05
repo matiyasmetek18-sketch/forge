@@ -290,6 +290,23 @@ def test_skill_prompt_and_hashes_are_recorded(tmp_path: Path, tiny_repo: dict[st
     assert row["final_prompt"] == expected
     assert row["prompt_template_version"] == 1
     assert row["snapshot_tree_sha"] == _run(["git", "rev-parse", f"{tiny_repo['base_commit']}^{{tree}}"], Path(tiny_repo["repo"])).stdout.strip()
+    skill.write_text("The skill file changed after this run.\n")
+    with sqlite3.connect(tmp_path / "runs.sqlite") as conn:
+        stored_prompt = conn.execute("SELECT final_prompt FROM runs WHERE run_id = ?", (result.run_id,)).fetchone()[0]
+    assert stored_prompt == expected
+
+
+@pytest.mark.parametrize("content", [None, b"\xff"])
+def test_missing_or_non_utf8_skill_is_invalid_config(tmp_path: Path, tiny_repo: dict[str, Path | str], content: bytes | None) -> None:
+    skill = tmp_path / "SKILL.md"
+    if content is not None:
+        skill.write_bytes(content)
+    agent = _agent(tmp_path, "pass")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, condition="skill", skill=skill)
+    assert result.status == "invalid_config"
+    assert row["agent_exit_code"] is None
+    assert row["final_prompt"] is None
+    assert row["snapshot_tree_sha"] is None
 
 
 @pytest.mark.parametrize("condition,provide_skill", [("baseline", True), ("skill", False)])
@@ -536,9 +553,9 @@ def test_disposable_snapshot_is_removed(tmp_path: Path, tiny_repo: dict[str, Pat
 
     @contextmanager
     def tracked_clone(repo: Path, commit: str):
-        with original(repo, commit) as (checkout, snapshot_commit):
+        with original(repo, commit) as (checkout, snapshot_commit, tree):
             roots.append(checkout.parent)
-            yield checkout, snapshot_commit
+            yield checkout, snapshot_commit, tree
 
     monkeypatch.setattr(runner_module, "disposable_snapshot", tracked_clone)
     agent = _agent(tmp_path, "pass")
