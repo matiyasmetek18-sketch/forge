@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 import time
@@ -187,7 +188,7 @@ def test_schema_idempotent_and_fields_round_trip(tmp_path: Path, tiny_repo: dict
 
     assert first.run_id != second.run_id
     assert count == 2
-    assert version == 1
+    assert version == 2
     assert row["condition"] == "baseline"
     assert row["trial"] == 2
     assert row["seed"] == 99
@@ -205,6 +206,12 @@ def test_schema_idempotent_and_fields_round_trip(tmp_path: Path, tiny_repo: dict
     assert Path(row["stdout_path"]).exists()
     assert Path(row["stderr_path"]).exists()
     assert row["forge_version"]
+    assert row["skill_id"] is None
+    assert row["skill_sha256"] is None
+    assert row["prompt_template_version"] is None
+    assert row["final_prompt"] == "Fix add_one."
+    assert row["final_prompt_sha256"] == hashlib.sha256(b"Fix add_one.").hexdigest()
+    assert row["snapshot_tree_sha"] == _run(["git", "rev-parse", f"{tiny_repo['base_commit']}^{{tree}}"], Path(tiny_repo["repo"])).stdout.strip()
     assert not hasattr(db_module, "update_run")
     assert not hasattr(db_module, "delete_run")
     _assert_canonical_clean(tiny_repo["repo"])
@@ -252,6 +259,112 @@ def test_cli_run_once_prints_run_id_and_status(tmp_path: Path, tiny_repo: dict[s
     assert status == "passed"
     assert _clone_roots() == clones_before
     _assert_canonical_clean(tiny_repo["repo"])
+
+
+def test_baseline_prompt_is_byte_identical(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    prompt = "  Fix add_one.\nKeep tests intact.  \n"
+    agent = _agent(tmp_path, "import os, sys\nsys.stdout.buffer.write(os.environ['FORGE_AGENT_PROMPT'].encode('utf-8'))")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, agent_prompt=prompt)
+    assert result.status == "failed"
+    assert Path(row["stdout_path"]).read_bytes() == prompt.encode("utf-8")
+    assert row["final_prompt"] == prompt
+    assert row["final_prompt_sha256"] == hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    assert row["skill_id"] is None
+    assert row["skill_sha256"] is None
+    assert row["prompt_template_version"] is None
+
+
+def test_skill_prompt_and_hashes_are_recorded(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill_bytes = b"First step: inspect the code.\nSecond step: test the fix.\n"
+    skill.write_bytes(skill_bytes)
+    prompt = "Fix add_one.\n"
+    agent = _agent(tmp_path, "import os, sys\nsys.stdout.buffer.write(os.environ['FORGE_AGENT_PROMPT'].encode('utf-8'))")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, condition="skill", skill=skill, agent_prompt=prompt)
+    expected = "Skill instructions:\n" + skill_bytes.decode() + "\n\nTask:\n" + prompt
+    assert result.status == "failed"
+    assert Path(row["stdout_path"]).read_bytes() == expected.encode("utf-8")
+    assert row["skill_id"] == "SKILL"
+    assert row["skill_sha256"] == hashlib.sha256(skill_bytes).hexdigest()
+    assert row["final_prompt_sha256"] == hashlib.sha256(expected.encode("utf-8")).hexdigest()
+    assert row["final_prompt"] == expected
+    assert row["prompt_template_version"] == 1
+    assert row["snapshot_tree_sha"] == _run(["git", "rev-parse", f"{tiny_repo['base_commit']}^{{tree}}"], Path(tiny_repo["repo"])).stdout.strip()
+
+
+@pytest.mark.parametrize("condition,provide_skill", [("baseline", True), ("skill", False)])
+def test_condition_skill_mismatch_is_invalid_config(tmp_path: Path, tiny_repo: dict[str, Path | str], condition: str, provide_skill: bool) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Follow the tests.\n")
+    agent = _agent(tmp_path, "pass")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, condition=condition, skill=skill if provide_skill else None)
+    assert result.status == "invalid_config"
+    assert row["status"] == "invalid_config"
+    assert row["agent_exit_code"] is None
+    assert row["snapshot_tree_sha"] is None
+
+
+def test_conditions_share_repo_environment_and_limits(tmp_path: Path, tiny_repo: dict[str, Path | str], monkeypatch: pytest.MonkeyPatch) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Inspect first.\n")
+    agent = _agent(tmp_path, "import json, os, subprocess\nprint(json.dumps({'tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(), 'status': subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip(), 'env': dict(os.environ)}, sort_keys=True))")
+    timeouts: list[float] = []
+    original = runner_module.run_command
+
+    def observed_run(*args, **kwargs):
+        timeouts.append(args[2])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runner_module, "run_command", observed_run)
+    _, baseline_row = _run_forge(tmp_path, tiny_repo, agent)
+    _, skill_row = _run_forge(tmp_path, tiny_repo, agent, condition="skill", skill=skill)
+    baseline = json.loads(Path(baseline_row["stdout_path"]).read_text())
+    skilled = json.loads(Path(skill_row["stdout_path"]).read_text())
+    assert baseline["tree"] == skilled["tree"] == baseline_row["snapshot_tree_sha"] == skill_row["snapshot_tree_sha"]
+    assert baseline["status"] == skilled["status"] == ""
+    assert baseline["env"].keys() == skilled["env"].keys()
+    assert Path(baseline["env"].pop("HOME")).name == Path(skilled["env"].pop("HOME")).name == "agent-home"
+    assert baseline["env"].pop("FORGE_AGENT_PROMPT") != skilled["env"].pop("FORGE_AGENT_PROMPT")
+    assert baseline["env"] == skilled["env"]
+    assert timeouts[:2] == timeouts[2:] == [3, 3]
+
+
+def test_skill_text_never_enters_run_repository(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    marker = "SECRET_SKILL_TEXT_827d"
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(marker)
+    agent = _agent(tmp_path, f"import os\nneedle = {marker!r}.encode()\nprint(any(needle in p.read_bytes() for p in Path('.').rglob('*') if p.is_file()))")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, condition="skill", skill=skill)
+    assert result.status == "failed"
+    assert Path(row["stdout_path"]).read_text().strip() == "False"
+
+
+def test_cli_skill_option_and_condition_validation(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    agent = _agent(tmp_path, "pass")
+    task = _task_file(tmp_path, tiny_repo)
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Inspect the tests.\n")
+    db = tmp_path / "cli-conditions.sqlite"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+    def invoke(condition: str, with_skill: bool) -> str:
+        command = [
+            sys.executable, "-m", "forge.cli", "run-once", str(task),
+            "--condition", condition, "--trial", "1", "--seed", "123",
+            "--experiment-id", "conditions", "--db", str(db),
+        ]
+        if with_skill:
+            command += ["--skill", str(skill)]
+        command += ["--agent-cmd", sys.executable, str(agent)]
+        result = subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
+        return result.stdout.strip().split()[1]
+
+    assert invoke("skill", True) == "failed"
+    assert invoke("baseline", True) == "invalid_config"
+    assert invoke("skill", False) == "invalid_config"
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 3
 
 
 @pytest.mark.parametrize("location", ["conftest.py", "tests/conftest.py"])
@@ -472,6 +585,9 @@ def _run_forge(
     grader_cmd: list[str] | None = None,
     grader_paths: list[str] | None = None,
     trial: int = 1,
+    condition: str = "baseline",
+    skill: Path | None = None,
+    agent_prompt: str = "Fix add_one.",
 ) -> tuple[object, sqlite3.Row]:
     before = _git_fingerprint(Path(tiny_repo["repo"]))
     clones_before = _clone_roots()
@@ -483,17 +599,19 @@ def _run_forge(
         grader_timeout_s=grader_timeout_s,
         grader_cmd=grader_cmd,
         grader_paths=grader_paths,
+        agent_prompt=agent_prompt,
     )
     db_path = db or (tmp_path / "runs.sqlite")
     result = run_once(
         RunOnceRequest(
             task_path=task,
-            condition="baseline",
+            condition=condition,
             trial=trial,
             seed=99,
             experiment_id="exp",
             db_path=db_path,
             agent_cmd=[sys.executable, str(agent)],
+            **({"skill_path": skill} if skill is not None else {}),
         )
     )
     with sqlite3.connect(db_path) as conn:
@@ -516,6 +634,7 @@ def _task_file(
     grader_timeout_s: float = 3,
     grader_cmd: list[str] | None = None,
     grader_paths: list[str] | None = None,
+    agent_prompt: str = "Fix add_one.",
 ) -> Path:
     command = grader_cmd or [sys.executable, "-m", "pytest", "-q"]
     task = tmp_path / f"task-{len(list(tmp_path.glob('task-*.toml')))}.toml"
@@ -526,7 +645,7 @@ def _task_file(
             version = "1"
             repo_path = {str(tiny_repo["repo"])!r}
             base_commit = {base_commit or str(tiny_repo["base_commit"])!r}
-            agent_prompt = "Fix add_one."
+            agent_prompt = {json.dumps(agent_prompt)}
             grader_cmd = {command!r}
             grader_paths = {grader_paths or ['test_calc.py']!r}
             agent_timeout_s = {agent_timeout_s}
