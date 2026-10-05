@@ -24,7 +24,14 @@ forge run-once TASK.toml \
   --agent-cmd python stub_agent.py
 ```
 
-The agent prompt is passed to the child process in `FORGE_AGENT_PROMPT`.
+For a skill run, use `--condition skill --skill /path/to/SKILL.md`.
+`--skill` is invalid for baseline runs. Baseline passes the task prompt unchanged
+in `FORGE_AGENT_PROMPT`; skill runs prepend the versioned skill template and
+skill text. Forge does not copy the skill file into the run repository.
+SQLite records the final prompt and its SHA-256, the skill file's SHA-256 and
+stem, template version, and snapshot tree SHA. Existing version 1 databases
+migrate in place; older rows keep NULL in the new columns.
+
 For pytest graders, Forge also restores pytest configuration, conftest files,
 and test modules. For unittest graders, it restores test modules, Python startup
 hooks, and modules that shadow the standard library. The grader command must
