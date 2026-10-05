@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--experiment-id", required=True)
     run_parser.add_argument("--db", required=True)
     run_parser.add_argument("--skill")
+    run_parser.add_argument("--skill-id")
     run_parser.add_argument("--agent-cmd", nargs="+", required=True)
 
     args = parser.parse_args(argv)
@@ -32,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
                 db_path=Path(args.db),
                 agent_cmd=args.agent_cmd,
                 skill_path=Path(args.skill) if args.skill is not None else None,
+                skill_id=args.skill_id,
             )
         )
         print(f"{result.run_id} {result.status}")

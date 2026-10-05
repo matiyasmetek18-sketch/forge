@@ -31,6 +31,7 @@ class RunOnceRequest:
     db_path: Path
     agent_cmd: list[str]
     skill_path: Path | None = None
+    skill_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,23 +133,27 @@ def _classify(agent: ProcessResult, grader: ProcessResult) -> str:
 
 def _prepare_prompt(request: RunOnceRequest, task: TaskDefinition) -> tuple[str, str | None, str | None, int | None]:
     if request.condition == "baseline":
-        if request.skill_path is not None:
-            raise InvalidConfigError("--skill is only valid with condition=skill")
+        if request.skill_path is not None or request.skill_id is not None:
+            raise InvalidConfigError("--skill and --skill-id are only valid with condition=skill")
         return task.agent_prompt, None, None, None
 
     if request.skill_path is None:
         raise InvalidConfigError("--skill is required with condition=skill")
     skill_path = request.skill_path
-    if skill_path.name != "SKILL.md":
-        raise InvalidConfigError("--skill must point to a SKILL.md file")
     try:
         skill_bytes = skill_path.read_bytes()
         skill_text = skill_bytes.decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise InvalidConfigError(f"cannot read UTF-8 skill file: {skill_path}") from exc
 
+    skill_id = request.skill_id if request.skill_id is not None else (
+        skill_path.resolve().parent.name if skill_path.name == "SKILL.md" else skill_path.stem
+    )
+    if not skill_id.strip():
+        raise InvalidConfigError("skill_id must not be empty or whitespace")
+
     final_prompt = SKILL_PROMPT_TEMPLATE.format(skill_text=skill_text, task_prompt=task.agent_prompt)
-    return final_prompt, skill_path.stem, hashlib.sha256(skill_bytes).hexdigest(), PROMPT_TEMPLATE_VERSION
+    return final_prompt, skill_id, hashlib.sha256(skill_bytes).hexdigest(), PROMPT_TEMPLATE_VERSION
 
 
 def _record(
