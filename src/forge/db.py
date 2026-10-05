@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -28,41 +28,33 @@ class RunRecord:
     stdout_path: str
     stderr_path: str
     forge_version: str
+    skill_id: str | None = None
+    skill_sha256: str | None = None
+    final_prompt_sha256: str | None = None
+    prompt_template_version: int | None = None
+    snapshot_tree_sha: str | None = None
+    final_prompt: str | None = None
+
+
+RUN_COLUMNS = tuple(RunRecord.__dataclass_fields__)
+NEW_COLUMNS = {
+    "skill_id": "TEXT",
+    "skill_sha256": "TEXT",
+    "final_prompt_sha256": "TEXT",
+    "prompt_template_version": "INTEGER",
+    "snapshot_tree_sha": "TEXT",
+    "final_prompt": "TEXT",
+}
 
 
 def insert_run(db_path: Path, record: RunRecord) -> None:
     try:
         with sqlite3.connect(db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
             _ensure_schema(conn)
             conn.execute(
-                """
-                INSERT INTO runs (
-                    run_id, experiment_id, task_id, task_version, condition,
-                    trial, seed, base_commit, status, agent_exit_code,
-                    grader_exit_code, protected_paths_modified, start_time,
-                    end_time, agent_cmd, stdout_path, stderr_path, forge_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record.run_id,
-                    record.experiment_id,
-                    record.task_id,
-                    record.task_version,
-                    record.condition,
-                    record.trial,
-                    record.seed,
-                    record.base_commit,
-                    record.status,
-                    record.agent_exit_code,
-                    record.grader_exit_code,
-                    record.protected_paths_modified,
-                    record.start_time,
-                    record.end_time,
-                    record.agent_cmd,
-                    record.stdout_path,
-                    record.stderr_path,
-                    record.forge_version,
-                ),
+                f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) VALUES ({', '.join('?' for _ in RUN_COLUMNS)})",
+                tuple(getattr(record, column) for column in RUN_COLUMNS),
             )
     except sqlite3.Error as exc:
         raise RuntimeError(f"DB failure: {exc}") from exc
@@ -70,7 +62,7 @@ def insert_run(db_path: Path, record: RunRecord) -> None:
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, SCHEMA_VERSION):
+    if version not in (0, 1, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported schema version: {version}")
     conn.execute(
         """
@@ -92,8 +84,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             agent_cmd TEXT NOT NULL,
             stdout_path TEXT NOT NULL,
             stderr_path TEXT NOT NULL,
-            forge_version TEXT NOT NULL
+            forge_version TEXT NOT NULL,
+            skill_id TEXT,
+            skill_sha256 TEXT,
+            final_prompt_sha256 TEXT,
+            prompt_template_version INTEGER,
+            snapshot_tree_sha TEXT,
+            final_prompt TEXT
         )
         """
     )
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    if version < SCHEMA_VERSION:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+        for column, sql_type in NEW_COLUMNS.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column} {sql_type}")
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
