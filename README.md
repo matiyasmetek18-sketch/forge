@@ -1,8 +1,9 @@
 # Forge
 
 Forge is an evidence-driven evaluation runner for coding-agent procedural skills.
-This first slice runs one task in a disposable local clone, restores protected
-grader files, grades the result, classifies the outcome, records it in SQLite,
+Each run exports the tree at `base_commit` into a disposable Git repository
+with one new commit and no remote or earlier history. Forge restores protected
+grader files from that snapshot commit, grades the result, records it in SQLite,
 and cleans up.
 
 ## Test
@@ -25,6 +26,11 @@ forge run-once TASK.toml \
 
 The agent prompt is passed to the child process in `FORGE_AGENT_PROMPT`.
 For pytest graders, Forge also restores pytest configuration, conftest files,
-and test modules to the pinned commit before grading. The grader command must
+and test modules. For unittest graders, it restores test modules, Python startup
+hooks, and modules that shadow the standard library. The grader command must
 exit 0 for solved, 1 for not solved, and any other code is `grader_error`;
 this follows pytest exit-code conventions.
+
+Isolation limits: an agent that knows the canonical repository path can still
+access it directly. A child that creates a new process session can escape
+process-group cleanup.
