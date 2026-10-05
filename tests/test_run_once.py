@@ -281,6 +281,97 @@ def test_agent_added_shadow_test_is_removed(tmp_path: Path, tiny_repo: dict[str,
     _assert_canonical_clean(tiny_repo["repo"])
 
 
+def test_new_test_inside_protected_directory_is_removed(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    repo = Path(tiny_repo["repo"])
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_calc.py").write_text((repo / "test_calc.py").read_text())
+    (repo / "test_calc.py").unlink()
+    _run(["git", "add", "-A"], repo)
+    _run(["git", "commit", "-m", "move grader into protected directory"], repo)
+    tiny_repo["base_commit"] = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    agent = _agent(tmp_path, "Path('tests/test_fake.py').write_text('def test_fake(): assert True\\n')")
+    grader = [sys.executable, "-c", "from pathlib import Path; raise SystemExit(0 if Path('tests/test_fake.py').exists() else 1)"]
+    result, row = _run_forge(tmp_path, tiny_repo, agent, grader_cmd=grader, grader_paths=["tests"])
+    assert result.status == "failed"
+    assert json.loads(row["protected_paths_modified"]) == ["tests"]
+    _assert_canonical_clean(repo)
+
+
+@pytest.mark.parametrize("name", ["sitecustomize.py", "usercustomize.py", "unittest.py", "json.py"])
+def test_unittest_grader_rejects_import_shadows(tmp_path: Path, tiny_repo: dict[str, Path | str], name: str) -> None:
+    repo = Path(tiny_repo["repo"])
+    (repo / "test_calc.py").write_text(
+        "import unittest\nfrom calc import add_one\n\nclass TestCalc(unittest.TestCase):\n"
+        "    def test_add_one(self):\n        self.assertEqual(add_one(1), 2)\n",
+        encoding="utf-8",
+    )
+    _run(["git", "add", "test_calc.py"], repo)
+    _run(["git", "commit", "-m", "use unittest grader"], repo)
+    tiny_repo["base_commit"] = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    agent = _agent(tmp_path, f"Path({name!r}).write_text('raise SystemExit(0)\\n')")
+    result, row = _run_forge(
+        tmp_path, tiny_repo, agent,
+        grader_cmd=[sys.executable, "-m", "unittest", "discover"],
+    )
+    assert result.status == "failed"
+    assert name in json.loads(row["protected_paths_modified"])
+    _assert_canonical_clean(repo)
+
+
+def test_snapshot_hides_later_history_and_objects(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    repo = Path(tiny_repo["repo"])
+    secret = "REFERENCE_FIX_ONLY_IN_LATER_COMMIT_9f4c"
+    (repo / "calc.py").write_text(f"def add_one(value):\n    return value + 1  # {secret}\n")
+    _run(["git", "add", "calc.py"], repo)
+    _run(["git", "commit", "-m", "reference fix"], repo)
+    later_commit = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    agent = _agent(
+        tmp_path,
+        "import subprocess\n"
+        "for args in [['log', '--all', '--oneline'], ['rev-list', '--all'], ['reflog', '--all'], "
+        "['fsck', '--lost-found', '--unreachable']]:\n"
+        "    result = subprocess.run(['git', *args], capture_output=True, text=True)\n"
+        "    print('COMMAND', args, result.stdout, result.stderr)\n"
+        "data = b''.join(p.read_bytes() for p in Path('.git').rglob('*') if p.is_file())\n"
+        f"print('FIX_IN_GIT_DIR', {secret!r}.encode() in data)\n"
+        f"print('LATER_HASH_IN_GIT_DIR', {later_commit!r}.encode() in data)",
+    )
+    result, row = _run_forge(tmp_path, tiny_repo, agent)
+    output = Path(row["stdout_path"]).read_text()
+    assert result.status == "failed"
+    assert secret not in output
+    assert later_commit not in output
+    assert "FIX_IN_GIT_DIR False" in output
+    assert "LATER_HASH_IN_GIT_DIR False" in output
+    _assert_canonical_clean(repo)
+
+
+def test_snapshot_has_one_commit_no_remote_and_usable_git(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    repo = Path(tiny_repo["repo"])
+    (repo / "calc.py").write_text("def add_one(value):\n    return value + 1\n")
+    _run(["git", "add", "calc.py"], repo)
+    _run(["git", "commit", "-m", "later reference fix"], repo)
+    agent = _agent(
+        tmp_path,
+        "import subprocess\n"
+        "print('COMMIT_COUNT', len(subprocess.check_output(['git', 'rev-list', '--all']).splitlines()))\n"
+        "for args in [['remote'], ['status', '--porcelain']]:\n"
+        "    print('RESULT', args, subprocess.check_output(['git', *args], text=True).strip())\n"
+        "Path('calc.py').write_text('def add_one(value):\\n    return value + 1\\n')\n"
+        "print('DIFF', subprocess.check_output(['git', 'diff', '--', 'calc.py'], text=True))\n"
+        "subprocess.run(['git', '-c', 'user.name=Forge', '-c', 'user.email=forge@example.test', "
+        "'commit', '-am', 'agent change'], check=True, capture_output=True)",
+    )
+    result, row = _run_forge(tmp_path, tiny_repo, agent)
+    output = Path(row["stdout_path"]).read_text()
+    assert result.status == "passed"
+    assert "RESULT ['remote'] \n" in output
+    assert "DIFF diff --git" in output
+    assert "COMMIT_COUNT 1\n" in output
+    assert row["agent_exit_code"] == 0
+    _assert_canonical_clean(tiny_repo["repo"])
+
+
 @pytest.mark.parametrize("action", ["symlink", "directory"])
 def test_protected_path_replacement_is_restored(tmp_path: Path, tiny_repo: dict[str, Path | str], action: str) -> None:
     repo = Path(tiny_repo["repo"])
