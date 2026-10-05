@@ -72,6 +72,21 @@ def test_agent_cannot_hide_failure_by_deleting_protected_test(tmp_path: Path, ti
     _assert_canonical_clean(tiny_repo["repo"])
 
 
+def test_committed_protected_tampering_is_restored_from_snapshot(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    agent = _agent(
+        tmp_path,
+        "import subprocess\n"
+        "Path('test_calc.py').write_text('def test_fake(): assert True\\n')\n"
+        "subprocess.run(['git', 'add', 'test_calc.py'], check=True)\n"
+        "subprocess.run(['git', '-c', 'user.name=Forge', '-c', 'user.email=forge@example.test', "
+        "'commit', '-m', 'tamper'], check=True, capture_output=True)",
+    )
+    result, row = _run_forge(tmp_path, tiny_repo, agent)
+    assert result.status == "failed"
+    assert json.loads(row["protected_paths_modified"]) == ["test_calc.py"]
+    _assert_canonical_clean(tiny_repo["repo"])
+
+
 def test_agent_timeout_is_recorded_and_cleans_clone(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     agent = _agent(tmp_path, "import time\ntime.sleep(5)")
     result, row = _run_forge(tmp_path, tiny_repo, agent, agent_timeout_s=0.2)
@@ -348,6 +363,7 @@ def test_snapshot_hides_later_history_and_objects(tmp_path: Path, tiny_repo: dic
 
 def test_snapshot_has_one_commit_no_remote_and_usable_git(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     repo = Path(tiny_repo["repo"])
+    expected_tree = _run(["git", "rev-parse", f"{tiny_repo['base_commit']}^{{tree}}"], repo).stdout.strip()
     (repo / "calc.py").write_text("def add_one(value):\n    return value + 1\n")
     _run(["git", "add", "calc.py"], repo)
     _run(["git", "commit", "-m", "later reference fix"], repo)
@@ -355,6 +371,7 @@ def test_snapshot_has_one_commit_no_remote_and_usable_git(tmp_path: Path, tiny_r
         tmp_path,
         "import subprocess\n"
         "print('COMMIT_COUNT', len(subprocess.check_output(['git', 'rev-list', '--all']).splitlines()))\n"
+        "print('TREE', subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip())\n"
         "for args in [['remote'], ['status', '--porcelain']]:\n"
         "    print('RESULT', args, subprocess.check_output(['git', *args], text=True).strip())\n"
         "Path('calc.py').write_text('def add_one(value):\\n    return value + 1\\n')\n"
@@ -368,6 +385,7 @@ def test_snapshot_has_one_commit_no_remote_and_usable_git(tmp_path: Path, tiny_r
     assert "RESULT ['remote'] \n" in output
     assert "DIFF diff --git" in output
     assert "COMMIT_COUNT 1\n" in output
+    assert f"TREE {expected_tree}\n" in output
     assert row["agent_exit_code"] == 0
     _assert_canonical_clean(tiny_repo["repo"])
 
@@ -389,7 +407,7 @@ def test_protected_path_replacement_is_restored(tmp_path: Path, tiny_repo: dict[
     _assert_canonical_clean(repo)
 
 
-def test_clone_does_not_change_canonical_git_objects_or_refs(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+def test_snapshot_does_not_change_canonical_git_objects_or_refs(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
     repo = Path(tiny_repo["repo"])
     before = _git_fingerprint(repo)
     agent = _agent(tmp_path, "import subprocess\nfor args in [['branch', 'agent-branch'], ['add', 'calc.py'], ['-c', 'user.name=Forge', '-c', 'user.email=forge@example.test', 'commit', '--allow-empty', '-m', 'agent'], ['update-ref', 'refs/heads/agent-ref', 'HEAD'], ['gc']]: subprocess.run(['git', *args], check=True, stdout=subprocess.DEVNULL)")
@@ -399,17 +417,17 @@ def test_clone_does_not_change_canonical_git_objects_or_refs(tmp_path: Path, tin
     _assert_canonical_clean(repo)
 
 
-def test_disposable_clone_is_removed(tmp_path: Path, tiny_repo: dict[str, Path | str], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disposable_snapshot_is_removed(tmp_path: Path, tiny_repo: dict[str, Path | str], monkeypatch: pytest.MonkeyPatch) -> None:
     roots: list[Path] = []
-    original = checkout_module.disposable_clone
+    original = checkout_module.disposable_snapshot
 
     @contextmanager
     def tracked_clone(repo: Path, commit: str):
-        with original(repo, commit) as clone:
-            roots.append(clone.parent)
-            yield clone
+        with original(repo, commit) as (checkout, snapshot_commit):
+            roots.append(checkout.parent)
+            yield checkout, snapshot_commit
 
-    monkeypatch.setattr(runner_module, "disposable_clone", tracked_clone)
+    monkeypatch.setattr(runner_module, "disposable_snapshot", tracked_clone)
     agent = _agent(tmp_path, "pass")
     result, _ = _run_forge(tmp_path, tiny_repo, agent)
     assert result.status == "failed"
@@ -556,4 +574,4 @@ def _git_fingerprint(repo: Path) -> tuple[str, str, int]:
 
 
 def _clone_roots() -> set[Path]:
-    return set(Path(tempfile.gettempdir()).glob("forge-clone-*"))
+    return set(Path(tempfile.gettempdir()).glob("forge-snapshot-*"))
