@@ -284,7 +284,7 @@ def test_skill_prompt_and_hashes_are_recorded(tmp_path: Path, tiny_repo: dict[st
     expected = "Skill instructions:\n" + skill_bytes.decode() + "\n\nTask:\n" + prompt
     assert result.status == "failed"
     assert Path(row["stdout_path"]).read_bytes() == expected.encode("utf-8")
-    assert row["skill_id"] == "SKILL"
+    assert row["skill_id"] == tmp_path.name
     assert row["skill_sha256"] == hashlib.sha256(skill_bytes).hexdigest()
     assert row["final_prompt_sha256"] == hashlib.sha256(expected.encode("utf-8")).hexdigest()
     assert row["final_prompt"] == expected
@@ -294,6 +294,49 @@ def test_skill_prompt_and_hashes_are_recorded(tmp_path: Path, tiny_repo: dict[st
     with sqlite3.connect(tmp_path / "runs.sqlite") as conn:
         stored_prompt = conn.execute("SELECT final_prompt FROM runs WHERE run_id = ?", (result.run_id,)).fetchone()[0]
     assert stored_prompt == expected
+
+
+def test_skill_ids_come_from_distinct_parent_directories(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    agent = _agent(tmp_path, "pass")
+    db = tmp_path / "skill-ids.sqlite"
+    ids = []
+    for name in ("foo", "bar"):
+        skill = tmp_path / "skills" / name / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(f"Use the {name} approach.\n")
+        result, row = _run_forge(tmp_path, tiny_repo, agent, db=db, condition="skill", skill=skill)
+        assert result.status == "failed"
+        ids.append(row["skill_id"])
+    assert ids == ["foo", "bar"]
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 2
+
+
+def test_non_standard_skill_filename_uses_stem(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    skill = tmp_path / "review-guide.md"
+    skill.write_text("Review the code first.\n")
+    agent = _agent(tmp_path, "pass")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, condition="skill", skill=skill)
+    assert result.status == "failed"
+    assert row["skill_id"] == "review-guide"
+
+
+@pytest.mark.parametrize("value", ["", "  \t  "])
+def test_empty_or_whitespace_skill_id_is_invalid_config(tmp_path: Path, tiny_repo: dict[str, Path | str], value: str) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Inspect first.\n")
+    agent = _agent(tmp_path, "pass")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, condition="skill", skill=skill, skill_id=value)
+    assert result.status == "invalid_config"
+    assert row["skill_id"] is None
+    assert row["agent_exit_code"] is None
+
+
+def test_baseline_skill_id_option_is_invalid_and_null(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    agent = _agent(tmp_path, "pass")
+    result, row = _run_forge(tmp_path, tiny_repo, agent, skill_id="foo")
+    assert result.status == "invalid_config"
+    assert row["skill_id"] is None
 
 
 @pytest.mark.parametrize("content", [None, b"\xff"])
@@ -365,7 +408,7 @@ def test_cli_skill_option_and_condition_validation(tmp_path: Path, tiny_repo: di
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
 
-    def invoke(condition: str, with_skill: bool) -> str:
+    def invoke(condition: str, with_skill: bool, skill_id: str | None = None) -> str:
         command = [
             sys.executable, "-m", "forge.cli", "run-once", str(task),
             "--condition", condition, "--trial", "1", "--seed", "123",
@@ -373,15 +416,18 @@ def test_cli_skill_option_and_condition_validation(tmp_path: Path, tiny_repo: di
         ]
         if with_skill:
             command += ["--skill", str(skill)]
+        if skill_id is not None:
+            command += ["--skill-id", skill_id]
         command += ["--agent-cmd", sys.executable, str(agent)]
         result = subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
         return result.stdout.strip().split()[1]
 
-    assert invoke("skill", True) == "failed"
+    assert invoke("skill", True, "explicit-foo") == "failed"
     assert invoke("baseline", True) == "invalid_config"
     assert invoke("skill", False) == "invalid_config"
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 3
+        assert conn.execute("SELECT skill_id FROM runs WHERE condition = 'skill' AND status = 'failed'").fetchone()[0] == "explicit-foo"
 
 
 @pytest.mark.parametrize("location", ["conftest.py", "tests/conftest.py"])
@@ -604,6 +650,7 @@ def _run_forge(
     trial: int = 1,
     condition: str = "baseline",
     skill: Path | None = None,
+    skill_id: str | None = None,
     agent_prompt: str = "Fix add_one.",
 ) -> tuple[object, sqlite3.Row]:
     before = _git_fingerprint(Path(tiny_repo["repo"]))
@@ -629,6 +676,7 @@ def _run_forge(
             db_path=db_path,
             agent_cmd=[sys.executable, str(agent)],
             **({"skill_path": skill} if skill is not None else {}),
+            **({"skill_id": skill_id} if skill_id is not None else {}),
         )
     )
     with sqlite3.connect(db_path) as conn:
