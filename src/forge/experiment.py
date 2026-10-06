@@ -128,7 +128,7 @@ def load_manifest(path: Path) -> Manifest:
     hashes: list[str] = []
     task_ids: set[str] = set()
     for task_path in tasks:
-        task = load_task(task_path)
+        task = load_task(task_path, validate_reference=True)
         if task.task_id in task_ids:
             raise InvalidConfigError(f"duplicate task_id: {task.task_id}")
         task_ids.add(task.task_id)

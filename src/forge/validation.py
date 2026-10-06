@@ -50,7 +50,7 @@ def validate_task(path: Path, db_path: Path, repeats: int = 3) -> tuple[bool, st
     try:
         if repeats < 1:
             raise InvalidConfigError("repeats must be greater than zero")
-        task = load_task(path)
+        task = load_task(path, validate_reference=True)
         values.update(task_id=task.task_id, task_version=task.version, grader_cmd=json.dumps(task.grader_cmd))
         base, reference, base_tree, reference_tree, fingerprint = task_identity(path, task)
         values.update(task_hash=fingerprint, base_commit=base, reference_commit=reference,

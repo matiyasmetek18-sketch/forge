@@ -138,3 +138,14 @@ def test_run_once_never_exposes_reference(tmp_path: Path, task_repo):
     with sqlite3.connect(db) as conn:
         stdout = conn.execute("SELECT stdout_path FROM runs").fetchone()[0]
     assert Path(stdout).read_text().strip() == "False"
+
+
+def test_run_once_ignores_invalid_reference_field(tmp_path: Path, task_repo):
+    repo, base, _ = task_repo
+    task = task_file(tmp_path, repo, base, "not-a-commit")
+    db = tmp_path / "run.sqlite"
+    agent = tmp_path / "noop.py"
+    agent.write_text("pass\n")
+    assert main(["run-once", str(task), "--condition", "baseline", "--trial", "1", "--seed", "1", "--experiment-id", "probe", "--db", str(db), "--agent-cmd", sys.executable, str(agent)]) == 0
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT status FROM runs").fetchone()[0] == "failed"

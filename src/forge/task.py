@@ -27,7 +27,7 @@ class TaskDefinition:
     reference_commit: str | None = None
 
 
-def load_task(path: str | Path) -> TaskDefinition:
+def load_task(path: str | Path, *, validate_reference: bool = False) -> TaskDefinition:
     task_path = Path(path)
     try:
         data = tomllib.loads(task_path.read_text(encoding="utf-8"))
@@ -72,8 +72,8 @@ def load_task(path: str | Path) -> TaskDefinition:
 
     base_commit = data["base_commit"]
     _validate_commit(repo_path, base_commit, "base_commit")
-    reference_commit = data.get("reference_commit")
-    if reference_commit is not None:
+    reference_commit = data.get("reference_commit") if validate_reference else None
+    if validate_reference and reference_commit is not None:
         if not isinstance(reference_commit, str) or not reference_commit:
             raise InvalidConfigError("reference_commit must be a nonempty string")
         _validate_commit(repo_path, reference_commit, "reference_commit")
