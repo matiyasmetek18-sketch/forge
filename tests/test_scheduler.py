@@ -141,3 +141,15 @@ def test_missing_codex_auth_stops_before_agent(tmp_path: Path, task_repo, capsys
     assert main(["run-experiment", str(manifest)]) != 0
     assert "credential_error" in capsys.readouterr().out
     assert rows(db, "runs") == []
+
+
+def test_malformed_codex_auth_stops_before_agent(tmp_path: Path, task_repo, capsys):
+    db = tmp_path / "experiment.sqlite"
+    task = ready_task(tmp_path, task_repo, db)
+    auth = tmp_path / "auth.json"
+    auth.write_text("not JSON")
+    stub = _codex_stub(tmp_path, "raise AssertionError('must not run')")
+    manifest = manifest_file(tmp_path, task, agent="codex", model="gpt-test", reasoning_effort="low", codex_bin=str(stub), codex_auth=str(auth))
+    assert main(["run-experiment", str(manifest)]) != 0
+    assert "credential_error" in capsys.readouterr().out
+    assert rows(db, "runs") == []

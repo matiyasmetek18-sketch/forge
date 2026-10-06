@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import random
 import sqlite3
 
@@ -171,8 +172,13 @@ def run_experiment(manifest: Manifest, *, limit: int | None = None, plan_only: b
             if tokens >= manifest.max_total_tokens:
                 stop_reason = "max_total_tokens reached"
                 break
-            if manifest.agent == "codex" and not auth_source(manifest.codex_auth).is_file():
-                raise CredentialError("Codex auth file is unavailable")
+            if manifest.agent == "codex":
+                try:
+                    auth = json.loads(auth_source(manifest.codex_auth).read_bytes())
+                except (OSError, ValueError, UnicodeDecodeError) as exc:
+                    raise CredentialError("Codex auth file is unavailable or invalid") from exc
+                if not isinstance(auth, dict) or not auth:
+                    raise CredentialError("Codex auth file is unavailable or invalid")
             result = run_once(RunOnceRequest(
                 task_path=by_task[row["task_id"]], condition=row["condition"],
                 trial=row["trial"], seed=row["run_seed"], experiment_id=manifest.experiment_id,
