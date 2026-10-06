@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 @dataclass(frozen=True)
@@ -133,9 +133,30 @@ def insert_experiment(db_path: Path, values: dict[str, object]) -> None:
         raise RuntimeError(f"DB failure: {exc}") from exc
 
 
+ANALYSIS_COLUMNS = (
+    "analysis_id", "experiment_id", "phase", "rule_sha256", "rule_version",
+    "analysis_code_sha256", "bootstrap_samples", "analysis_seed", "n_tasks",
+    "estimate_pp", "ci_lo_pp", "ci_hi_pp", "verdict", "reasons", "report",
+    "timestamp", "forge_version",
+)
+
+
+def insert_analysis(db_path: Path, values: dict[str, object]) -> None:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_schema(conn)
+            conn.execute(
+                f"INSERT INTO analyses ({', '.join(ANALYSIS_COLUMNS)}) VALUES ({', '.join('?' for _ in ANALYSIS_COLUMNS)})",
+                tuple(values.get(column) for column in ANALYSIS_COLUMNS),
+            )
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"DB failure: {exc}") from exc
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, 3, 4, 5, 6, SCHEMA_VERSION):
+    if version not in (0, 1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported schema version: {version}")
     conn.execute(
         """
@@ -253,7 +274,37 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             manifest_sha256 TEXT NOT NULL,
             benchmark_hash TEXT NOT NULL,
             skill_sha256 TEXT,
-            timestamp TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            rule_sha256 TEXT,
+            analysis_code_sha256 TEXT
         )
         """
     )
+    freeze_columns = {row[1] for row in conn.execute("PRAGMA table_info(freezes)")}
+    for column in ("rule_sha256", "analysis_code_sha256"):
+        if column not in freeze_columns:
+            conn.execute(f"ALTER TABLE freezes ADD COLUMN {column} TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analyses (
+            analysis_id TEXT PRIMARY KEY,
+            experiment_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            rule_sha256 TEXT NOT NULL,
+            rule_version TEXT NOT NULL,
+            analysis_code_sha256 TEXT NOT NULL,
+            bootstrap_samples INTEGER NOT NULL,
+            analysis_seed INTEGER NOT NULL,
+            n_tasks INTEGER NOT NULL,
+            estimate_pp REAL,
+            ci_lo_pp REAL,
+            ci_hi_pp REAL,
+            verdict TEXT NOT NULL,
+            reasons TEXT NOT NULL,
+            report TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            forge_version TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_final_analysis ON analyses(experiment_id) WHERE phase='final'")

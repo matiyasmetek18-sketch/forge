@@ -7,6 +7,7 @@ import sys
 from forge.runner import RunOnceRequest, run_once
 from forge.experiment import load_manifest
 from forge.freeze import record_freeze
+from forge.analysis import AnalysisMismatchError, analyze_experiment, render_report
 from forge.scheduler import CredentialError, run_experiment
 from forge.task import InvalidConfigError
 from forge.validation import validate_task
@@ -42,8 +43,30 @@ def main(argv: list[str] | None = None) -> int:
     freeze_parser = subparsers.add_parser("freeze")
     freeze_parser.add_argument("manifest")
     freeze_parser.add_argument("--db", required=True)
+    freeze_parser.add_argument("--rule")
+    analyze_parser = subparsers.add_parser("analyze")
+    analyze_parser.add_argument("--db", required=True)
+    analyze_parser.add_argument("--experiment-id", required=True)
+    analyze_parser.add_argument("--rule")
+    analyze_parser.add_argument("--out")
+    analyze_parser.add_argument("--bootstrap-samples", type=int, default=10000)
+    analyze_parser.add_argument("--analysis-seed", type=int, default=12345)
 
     args = parser.parse_args(argv)
+    if args.command == "analyze":
+        try:
+            report = analyze_experiment(
+                Path(args.db), args.experiment_id,
+                Path(args.rule) if args.rule is not None else None,
+                args.bootstrap_samples, args.analysis_seed,
+            )
+            if args.out is not None:
+                Path(args.out).write_text(render_report(report, markdown=True), encoding="utf-8")
+            print(render_report(report), end="")
+            return 0
+        except (InvalidConfigError, AnalysisMismatchError) as exc:
+            print(f"analysis_error: {exc}")
+            return 2
     if args.command == "validate-task":
         ok, message = validate_task(Path(args.task), Path(args.db), args.repeats)
         print(f"{message} {args.task}")
@@ -62,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "freeze":
         try:
             manifest = load_manifest(Path(args.manifest))
-            record_freeze(manifest, Path(args.db))
+            record_freeze(manifest, Path(args.db), Path(args.rule) if args.rule is not None else None)
         except InvalidConfigError as exc:
             print(f"invalid_config: {exc}")
             return 2
