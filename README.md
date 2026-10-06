@@ -68,6 +68,17 @@ including `agent_error` and `agent_timeout`, stands and counts as unsuccessful.
 The token budget checks usage already recorded before each run, so one run can
 cross the cap; runs without telemetry still count against `max_total_runs`.
 
+A manifest uses flat TOML keys: `experiment_id`, `phase` (`pilot` or `final`),
+`db`, `tasks`, `conditions`, `trials_per_condition`, `seed`, `agent`,
+`max_total_runs`, and `max_total_tokens`. Add `skill` and optional `skill_id`
+when using the skill condition. For `agent = "cmd"`, set `argv`; for
+`agent = "codex"`, set `model` and `reasoning_effort`, with optional
+`codex_bin` and `codex_auth`.
+
+Before a final-phase run, record the manifest, benchmark, and skill hashes with
+`forge freeze MANIFEST.toml --db runs.sqlite` (the same DB named in the
+manifest). Final runs require an exact matching freeze; pilot runs do not.
+
 For pytest graders, Forge also restores pytest configuration, conftest files,
 and test modules. For unittest graders, it restores test modules, Python startup
 hooks, and modules that shadow the standard library. The grader command must

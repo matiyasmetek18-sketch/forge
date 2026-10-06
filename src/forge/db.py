@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -135,7 +135,7 @@ def insert_experiment(db_path: Path, values: dict[str, object]) -> None:
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, 3, 4, 5, SCHEMA_VERSION):
+    if version not in (0, 1, 2, 3, 4, 5, 6, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported schema version: {version}")
     conn.execute(
         """
@@ -243,6 +243,17 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             attempts INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (experiment_id, task_id, condition, trial),
             UNIQUE (experiment_id, planned_position)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS freezes (
+            freeze_id TEXT PRIMARY KEY,
+            manifest_sha256 TEXT NOT NULL,
+            benchmark_hash TEXT NOT NULL,
+            skill_sha256 TEXT,
+            timestamp TEXT NOT NULL
         )
         """
     )

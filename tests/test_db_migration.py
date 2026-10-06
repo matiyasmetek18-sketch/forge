@@ -48,7 +48,7 @@ def test_v1_database_migrates_without_losing_rows(tmp_path) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
 
-    assert version == 6
+    assert version == 7
     assert len(rows) == 2
     assert tuple(rows[1][name] for name in V1_COLUMNS) == old
     assert rows[0]["run_id"] == "new-run"
@@ -70,7 +70,7 @@ def test_v2_database_migrates_with_existing_row(tmp_path) -> None:
         conn.execute("PRAGMA user_version = 2")
     insert_run(db, RunRecord("new", "exp", "task", "1", "baseline", 1, 1, "base", "failed", 0, 1, "[]", "start", "end", "[]", "out", "err", "1"))
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT skill_id, agent_name, secret_exposure FROM runs WHERE run_id='prior'").fetchone() == ("old-skill", None, None)
 
 
@@ -82,7 +82,7 @@ def test_v3_database_gains_validations_without_losing_runs(tmp_path) -> None:
         conn.execute("PRAGMA user_version = 3")
     insert_run(db, RunRecord("new", "exp", "task", "1", "baseline", 1, 1, "base", "failed", 0, 1, "[]", "start", "end", "[]", "out", "err", "1"))
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT agent_name FROM runs WHERE run_id='prior'").fetchone() == ("codex",)
         assert conn.execute("SELECT name FROM sqlite_master WHERE name='task_validations'").fetchone() is not None
 
@@ -97,7 +97,7 @@ def test_v4_database_gains_experiments_without_losing_rows(tmp_path) -> None:
         conn.execute("PRAGMA user_version = 4")
     insert_run(db, RunRecord("new", "exp", "task", "1", "baseline", 1, 1, "base", "failed", 0, 1, "[]", "start", "end", "[]", "out", "err", "1"))
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT task_id FROM task_validations WHERE validation_id='v1'").fetchone() == ("task",)
         assert conn.execute("SELECT name FROM sqlite_master WHERE name='experiments'").fetchone() is not None
 
@@ -111,6 +111,20 @@ def test_v5_database_gains_plan_without_losing_experiment(tmp_path) -> None:
         conn.execute("PRAGMA user_version = 5")
     insert_run(db, RunRecord("new", "exp", "task", "1", "baseline", 1, 1, "base", "failed", 0, 1, "[]", "start", "end", "[]", "out", "err", "1"))
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("SELECT manifest_sha256 FROM experiments WHERE experiment_id='old'").fetchone() == ("hash",)
         assert conn.execute("SELECT name FROM sqlite_master WHERE name='experiment_runs'").fetchone() is not None
+
+
+def test_v6_database_gains_freezes_without_losing_plan(tmp_path) -> None:
+    db = tmp_path / "v6.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE runs (" + ", ".join(f"{name} TEXT" for name in RunRecord.__dataclass_fields__) + ")")
+        conn.execute("CREATE TABLE experiment_runs (experiment_id TEXT, task_id TEXT, condition TEXT, trial INTEGER, planned_position INTEGER, run_seed INTEGER, run_id TEXT, attempts INTEGER)")
+        conn.execute("INSERT INTO experiment_runs VALUES ('exp', 'task', 'baseline', 1, 0, 7, NULL, 0)")
+        conn.execute("PRAGMA user_version = 6")
+    insert_run(db, RunRecord("new", "exp", "task", "1", "baseline", 1, 1, "base", "failed", 0, 1, "[]", "start", "end", "[]", "out", "err", "1"))
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("SELECT run_seed FROM experiment_runs").fetchone() == (7,)
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='freezes'").fetchone() is not None

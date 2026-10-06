@@ -7,6 +7,7 @@ import sqlite3
 from forge.codex_adapter import auth_source
 from forge.db import _ensure_schema
 from forge.experiment import Manifest, register_experiment
+from forge.freeze import require_freeze
 from forge.runner import RunOnceRequest, run_once
 from forge.task import InvalidConfigError, load_task
 
@@ -140,6 +141,7 @@ def _credential_failed(manifest: Manifest, run_id: str) -> bool:
 def run_experiment(manifest: Manifest, *, limit: int | None = None, plan_only: bool = False) -> None:
     if limit is not None and limit < 1:
         raise InvalidConfigError("--limit must be greater than zero")
+    require_freeze(manifest)
     preflight(manifest)
     register_experiment(manifest)
     persist_plan(manifest)

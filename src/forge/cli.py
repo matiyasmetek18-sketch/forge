@@ -6,6 +6,7 @@ import sys
 
 from forge.runner import RunOnceRequest, run_once
 from forge.experiment import load_manifest
+from forge.freeze import record_freeze
 from forge.scheduler import CredentialError, run_experiment
 from forge.task import InvalidConfigError
 from forge.validation import validate_task
@@ -38,6 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     experiment_parser.add_argument("manifest")
     experiment_parser.add_argument("--plan-only", action="store_true")
     experiment_parser.add_argument("--limit", type=int)
+    freeze_parser = subparsers.add_parser("freeze")
+    freeze_parser.add_argument("manifest")
+    freeze_parser.add_argument("--db", required=True)
 
     args = parser.parse_args(argv)
     if args.command == "validate-task":
@@ -54,6 +58,15 @@ def main(argv: list[str] | None = None) -> int:
         except CredentialError as exc:
             print(f"credential_error: {exc}")
             return 1
+        return 0
+    if args.command == "freeze":
+        try:
+            manifest = load_manifest(Path(args.manifest))
+            record_freeze(manifest, Path(args.db))
+        except InvalidConfigError as exc:
+            print(f"invalid_config: {exc}")
+            return 2
+        print(f"frozen {manifest.experiment_id}")
         return 0
     if args.command == "run-once":
         result = run_once(
