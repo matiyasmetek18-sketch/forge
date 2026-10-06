@@ -1,0 +1,5 @@
+task_id = "config_fallback"
+family = "error-edge"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The configuration loader silently falls back when a present primary port setting is malformed. It should use the fallback only when the primary setting is absent; malformed or out-of-range primary values must be reported. Repair the error handling while preserving valid fallback behavior."

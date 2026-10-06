@@ -1,0 +1,5 @@
+task_id = "booking_overlap"
+family = "algorithm-logic"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The booking calendar accepts some overlapping reservations. Intervals are half-open [start, end), so touching endpoints are allowed but any shared span is not. Inspect the conflict logic and repair it while preserving existing reservations."

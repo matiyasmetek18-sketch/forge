@@ -1,0 +1,5 @@
+task_id = "parse_limit"
+family = "input-validation"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The request limit parser accepts malformed query values such as signed or padded numbers. It should accept only ASCII decimal digit strings representing 1 through 100; None uses the default. Diagnose and repair the parser without changing valid inputs."

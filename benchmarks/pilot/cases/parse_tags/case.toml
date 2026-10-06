@@ -1,0 +1,5 @@
+task_id = "parse_tags"
+family = "input-validation"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The tag parser silently accepts malformed comma-separated input. Empty fields and duplicate tags (ignoring case) should be rejected; valid tags should be stripped, lowercased, and returned in input order. Investigate and repair the validation behavior."

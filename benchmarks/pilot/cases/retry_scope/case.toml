@@ -1,0 +1,5 @@
+task_id = "retry_scope"
+family = "error-edge"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The retry helper repeats operations after permanent failures. It should retry only TransientError, up to the attempt limit, while propagating any other exception immediately. Investigate the exception boundary and repair it."

@@ -1,0 +1,5 @@
+task_id = "event_dispatch"
+family = "state-mutation"
+phase = "pilot"
+requires_network = false
+agent_prompt = "Event delivery is unstable when a listener subscribes or unsubscribes during a callback. Every listener subscribed at the start of an emit should receive that event exactly once; subscription changes should affect later emits. Diagnose the state-mutation bug."

@@ -1,0 +1,5 @@
+task_id = "pagination_cursor"
+family = "integration-boundary"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The paginated client omits records after an empty page even when the API supplies a continuation cursor. A page has items and next_cursor; only a missing next_cursor ends traversal. Repair the client behavior without making network calls."

@@ -1,0 +1,5 @@
+task_id = "weighted_route"
+family = "algorithm-logic"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The route helper sometimes returns a more expensive path in a directed graph with positive edge costs. It should return the minimum total cost from start to destination, or None if unreachable. Diagnose the traversal and repair it."

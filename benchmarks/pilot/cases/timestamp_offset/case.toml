@@ -1,0 +1,5 @@
+task_id = "timestamp_offset"
+family = "integration-boundary"
+phase = "pilot"
+requires_network = false
+agent_prompt = "The API timestamp adapter reports the wrong instant for ISO 8601 strings with non-UTC offsets. Return a UTC-aware datetime representing the same instant; naive timestamps are defined as UTC. Inspect the boundary conversion and repair it."
