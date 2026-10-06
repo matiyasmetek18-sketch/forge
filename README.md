@@ -62,7 +62,8 @@ fresh base and reference snapshots and records the checks in SQLite.
 
 `forge run-experiment MANIFEST.toml` uses a seeded, persisted plan. Use
 `--plan-only` to inspect it or `--limit N` to execute at most N attempts now;
-repeat the command to resume. Manifest paths are relative to the manifest.
+repeat the command to resume. `db`, `tasks`, `skill`, and `codex_auth` paths
+are relative to the manifest; `argv` is passed directly to the run checkout.
 Runs with `infra_error` are retried at most once. Every other outcome,
 including `agent_error` and `agent_timeout`, stands and counts as unsuccessful.
 The token budget checks usage already recorded before each run, so one run can
