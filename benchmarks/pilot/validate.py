@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
 
 from forge.validation import validate_task
 
@@ -19,6 +20,16 @@ def validate_pilot(root: Path) -> None:
             failures.append(task.stem)
     if failures:
         raise RuntimeError("pilot validation failed: " + ", ".join(failures))
+    smoke = tomllib.loads((root / "generated" / "smoke.toml").read_text(encoding="utf-8"))
+    smoke_failures = []
+    for name in smoke["tasks"]:
+        task = Path(name)
+        ok, message = validate_task(task, Path(smoke["db"]), repeats=3)
+        print(f"smoke/{task.stem}: {message}")
+        if not ok:
+            smoke_failures.append(task.stem)
+    if smoke_failures:
+        raise RuntimeError("smoke validation failed: " + ", ".join(smoke_failures))
 
 
 if __name__ == "__main__":

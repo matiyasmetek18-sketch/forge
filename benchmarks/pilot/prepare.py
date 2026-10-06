@@ -13,6 +13,7 @@ FAMILIES = {
     "input-validation", "state-mutation", "algorithm-logic",
     "integration-boundary", "error-edge",
 }
+SMOKE_TASK_IDS = ("parse_tags", "event_dispatch", "weighted_route")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -110,6 +111,16 @@ def prepare_pilot(root: Path, *, model: str, skill_path: Path) -> Path:
         template + "\n" + "".join(f"{key} = {json.dumps(value)}\n" for key, value in {
             "db": str(generated / "pilot.sqlite"),
             "tasks": [str(path) for path in task_paths],
+            "skill": str(skill_path),
+            "skill_id": "systematic-debugging-v1",
+            "model": model,
+        }.items()), encoding="utf-8",
+    )
+    smoke_template = (root / "smoke.template.toml").read_text(encoding="utf-8")
+    (generated / "smoke.toml").write_text(
+        smoke_template + "\n" + "".join(f"{key} = {json.dumps(value)}\n" for key, value in {
+            "db": str(generated / "smoke.sqlite"),
+            "tasks": [str(tasks_dir / f"{task_id}.toml") for task_id in SMOKE_TASK_IDS],
             "skill": str(skill_path),
             "skill_id": "systematic-debugging-v1",
             "model": model,

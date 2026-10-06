@@ -36,11 +36,12 @@ Codex model ID for this environment. No model is guessed by the template:
 ```sh
 python3 benchmarks/pilot/prepare.py --model YOUR_PINNED_MODEL
 python3 benchmarks/pilot/validate.py
+forge run-experiment benchmarks/pilot/generated/smoke.toml --plan-only
 forge run-experiment benchmarks/pilot/generated/manifest.toml --plan-only
 ```
 
-These commands materialize fixtures, run graders, and display the plan; none
-launch an agent. The last command may query `codex --version`. The committed
+These commands materialize fixtures, run graders, and display both plans; none
+launch an agent. Plan commands may query `codex --version`. The committed
 template pins `reasoning_effort = "medium"`, seed 20261006, 3 trials per
 condition, both conditions, `max_total_runs = 66`, and a 1,500,000-token
 ceiling. Ten valid tasks produce 60 planned runs (30 per condition); the extra
@@ -48,14 +49,25 @@ six-run allowance is only for infrastructure retries. The token ceiling checks
 usage before each run and one run can cross it. Cost in currency cannot be
 estimated without verified model pricing and a smoke measurement.
 
-**Do not execute during preparation.** After human approval, the intended small
-smoke command is:
+The [audit](AUDIT.md) selects `parse_tags`, `event_dispatch`, and
+`weighted_route` for a separate six-slot smoke: one baseline and one skill run
+per task, seed 20261007, `max_total_runs = 8`, and a 150,000-token ceiling.
+Preparation uses the **same explicitly supplied model**, reasoning effort, and
+skill for both manifests. Validation records the three selected tasks in the
+separate smoke DB. No smoke result enters the full pilot DB.
+
+**Do not execute during preparation.** After human approval, run the smoke with:
 
 ```sh
-forge run-experiment benchmarks/pilot/generated/manifest.toml --limit 2
+forge run-experiment benchmarks/pilot/generated/smoke.toml
 ```
 
-Pilot analysis, after actual runs, may use
+Afterward, analyze that smoke with
+`forge analyze --db benchmarks/pilot/generated/smoke.sqlite --experiment-id systematic-debugging-smoke-v1 --rule benchmarks/pilot/pilot-rule.toml`.
+Its sample is too small for efficacy claims. The full pilot, only after smoke
+review and authorization, uses
+`forge run-experiment benchmarks/pilot/generated/manifest.toml`.
+Pilot analysis, after actual full-pilot runs, may use
 `forge analyze --db benchmarks/pilot/generated/pilot.sqlite --experiment-id systematic-debugging-pilot-v1 --rule benchmarks/pilot/pilot-rule.toml`.
 Its output remains development information, not final evidence.
 
