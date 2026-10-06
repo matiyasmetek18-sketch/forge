@@ -34,6 +34,26 @@ SQLite records the final prompt and its SHA-256, the skill file's SHA-256 and
 ID, template version, and snapshot tree SHA. Existing version 1 databases
 migrate in place; older rows keep NULL in the new columns.
 
+To evaluate with Codex instead of `--agent-cmd`, use `--agent codex --model MODEL
+--reasoning-effort EFFORT`. `--codex-bin` defaults to `codex`; `--codex-auth`
+defaults to `auth.json` in the user's `CODEX_HOME` or `~/.codex`. Forge passes
+the final prompt on stdin, runs Codex with `workspace-write`, and records JSONL
+usage, tool counts, elapsed time, the requested model and effort, and the
+`codex --version` result. Version 1 and 2 databases migrate in place.
+
+Codex receives a temporary home containing only a private copy of `auth.json`;
+Forge deletes it after the run. This excludes personal Codex settings from the
+experimental conditions, but **does not protect the real home**: sandboxed
+commands can read the real auth file. Forge detects exact auth string values of
+at least 20 characters in logs and checkout files, redacts matches in stored
+logs, and records `secret_exposure=1`. Encoded, split, or transformed secrets
+are not detected. Logs default to a temporary directory outside the repo and
+must never be committed or shared.
+
+Codex may refresh or rotate the copied credential during a run. If that
+invalidates the user's real login, they may need to run `codex login` again;
+Forge does not reconcile credentials.
+
 For pytest graders, Forge also restores pytest configuration, conftest files,
 and test modules. For unittest graders, it restores test modules, Python startup
 hooks, and modules that shadow the standard library. The grader command must
