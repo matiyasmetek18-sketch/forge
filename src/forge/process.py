@@ -35,6 +35,7 @@ def run_command(
     stdout_path: Path,
     stderr_path: Path,
     env: dict[str, str],
+    stdin_data: bytes | None = None,
 ) -> ProcessResult:
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,11 +46,16 @@ def run_command(
             env=env,
             stdout=stdout,
             stderr=stderr,
+            stdin=subprocess.PIPE if stdin_data is not None else None,
             shell=False,
             start_new_session=True,
         )
         try:
-            exit_code = proc.wait(timeout=timeout_s)
+            if stdin_data is None:
+                exit_code = proc.wait(timeout=timeout_s)
+            else:
+                proc.communicate(input=stdin_data, timeout=timeout_s)
+                exit_code = proc.returncode
             _kill_process_group(proc.pid, signal.SIGKILL)
             return ProcessResult(exit_code, False, stdout_path, stderr_path)
         except subprocess.TimeoutExpired:
