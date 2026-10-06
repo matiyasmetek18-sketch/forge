@@ -188,7 +188,7 @@ def test_schema_idempotent_and_fields_round_trip(tmp_path: Path, tiny_repo: dict
 
     assert first.run_id != second.run_id
     assert count == 2
-    assert version == 2
+    assert version == 3
     assert row["condition"] == "baseline"
     assert row["trial"] == 2
     assert row["seed"] == 99
@@ -759,3 +759,105 @@ def _git_fingerprint(repo: Path) -> tuple[str, str, int]:
 
 def _clone_roots() -> set[Path]:
     return set(Path(tempfile.gettempdir()).glob("forge-snapshot-*"))
+
+
+def _codex_stub(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "codex-stub"
+    path.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, sys, time\n"
+        "from pathlib import Path\n"
+        "if sys.argv[1:] == ['--version']:\n"
+        "    print('codex-cli 0.test')\n"
+        "    raise SystemExit(0)\n"
+        + body + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _run_codex(tmp_path: Path, tiny_repo: dict[str, Path | str], stub: Path, auth: Path, **kwargs):
+    task = _task_file(tmp_path, tiny_repo, agent_timeout_s=kwargs.pop("timeout", 3))
+    db = tmp_path / "codex.sqlite"
+    result = run_once(RunOnceRequest(
+        task_path=task, condition=kwargs.pop("condition", "baseline"), trial=1,
+        seed=99, experiment_id="codex", db_path=db, agent_cmd=[], agent="codex",
+        model="gpt-test", reasoning_effort="low", codex_bin=str(stub),
+        codex_auth=auth, **kwargs,
+    ))
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (result.run_id,)).fetchone()
+    return result, row, db
+
+
+def test_codex_stub_telemetry_and_clean_home(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    auth = tmp_path / "auth.json"
+    auth.write_text('{"token":"sentinel-auth-value-1234567890"}')
+    stub = _codex_stub(tmp_path,
+        "home = Path(os.environ['CODEX_HOME'])\n"
+        "assert home.stat().st_mode & 0o777 == 0o700\n"
+        "assert [p.name for p in home.iterdir()] == ['auth.json']\n"
+        "assert (home / 'auth.json').stat().st_mode & 0o777 == 0o600\n"
+        "assert json.loads((home / 'auth.json').read_text())['token'] == 'sentinel-auth-value-1234567890'\n"
+        "assert 'FORGE_AGENT_PROMPT' not in os.environ\n"
+        "assert 'auth.json' not in os.environ.get('HOME', '')\n"
+        "assert sys.argv[1:8] == ['exec', '--json', '--sandbox', 'workspace-write', '-m', 'gpt-test', '-c']\n"
+        "assert sys.argv[8] == 'model_reasoning_effort=low'\n"
+        "prompt = sys.stdin.read() if sys.argv[9:] == ['-'] else sys.argv[9]\n"
+        "assert prompt == 'Fix add_one.'\n"
+        "Path(os.environ['HOME']).joinpath('codex-home-path').write_text(str(home))\n"
+        "print(json.dumps({'type':'thread.started'}))\n"
+        "print(json.dumps({'type':'turn.started'}))\n"
+        "print(json.dumps({'type':'item.completed','item':{'type':'command_execution'}}))\n"
+        "print(json.dumps({'type':'item.completed','item':{'type':'file_change'}}))\n"
+        "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_input_tokens':20,'output_tokens':30}}))")
+    result, row, _ = _run_codex(tmp_path, tiny_repo, stub, auth)
+    assert result.status == "failed"
+    assert (row["agent_name"], row["agent_version"], row["model"], row["reasoning_effort"]) == ("codex", "codex-cli 0.test", "gpt-test", "low")
+    assert (row["input_tokens"], row["cached_input_tokens"], row["output_tokens"]) == (100, 20, 30)
+    assert (row["command_count"], row["file_change_count"], row["telemetry_status"]) == (1, 1, "ok")
+    assert row["wall_seconds"] >= 0
+    assert not Path((Path(row["stdout_path"]).parent / "agent-home" / "codex-home-path").read_text()).exists()
+    assert row["secret_exposure"] == 0
+
+
+@pytest.mark.parametrize("body,expected", [("pass", "missing"), ("print('{bad')", "unparseable")])
+def test_codex_missing_or_bad_telemetry_is_nullable(tmp_path: Path, tiny_repo: dict[str, Path | str], body: str, expected: str) -> None:
+    auth = tmp_path / "auth.json"
+    auth.write_text('{"token":"sentinel-auth-value-1234567890"}')
+    stub = _codex_stub(tmp_path, body)
+    result, row, _ = _run_codex(tmp_path, tiny_repo, stub, auth)
+    assert result.status == "failed"
+    assert row["telemetry_status"] == expected
+    assert all(row[name] is None for name in ("input_tokens", "cached_input_tokens", "output_tokens", "command_count", "file_change_count"))
+
+
+def test_codex_exact_secret_detection_and_cleanup(tmp_path: Path, tiny_repo: dict[str, Path | str]) -> None:
+    sentinel = "sentinel-auth-value-1234567890"
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({"token": sentinel}))
+    stub = _codex_stub(tmp_path,
+        "secret = json.loads(Path(os.environ['CODEX_HOME']).joinpath('auth.json').read_text())['token']\n"
+        "Path('leaked.txt').write_text(secret)\n"
+        "print(secret)\n"
+        "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'cached_input_tokens':0,'output_tokens':1}}))")
+    result, row, db = _run_codex(tmp_path, tiny_repo, stub, auth)
+    assert result.status == "failed"
+    assert row["secret_exposure"] == 1
+    assert "[REDACTED]" in Path(row["stdout_path"]).read_text()
+    assert sentinel not in Path(row["stdout_path"]).read_text()
+    assert sentinel.encode() not in db.read_bytes()
+
+
+@pytest.mark.parametrize("body,timeout,status", [("pass", 3, "failed"), ("time.sleep(5)", 0.2, "agent_timeout"), ("raise RuntimeError('crash')", 3, "agent_error")])
+def test_codex_home_removed_all_exits(tmp_path: Path, tiny_repo: dict[str, Path | str], body: str, timeout: float, status: str) -> None:
+    auth = tmp_path / "auth.json"
+    auth.write_text('{"token":"sentinel-auth-value-1234567890"}')
+    stub = _codex_stub(tmp_path, "Path(os.environ['HOME']).joinpath('codex-home-path').write_text(os.environ['CODEX_HOME'])\n" + body)
+    result, row, _ = _run_codex(tmp_path, tiny_repo, stub, auth, timeout=timeout)
+    assert result.status == status
+    home_path = Path(row["stdout_path"]).parent / "agent-home" / "codex-home-path"
+    assert home_path.exists()
+    assert not Path(home_path.read_text()).exists()
