@@ -102,7 +102,7 @@ def test_promotion_rejection_and_inconclusive_boundaries(tmp_path: Path):
     db = synthetic_db(tmp_path / "reject", qualifying_tasks(base_passes=2, skill_passes=2))
     assert run_analysis(db)[1]["verdict"] == "REJECT"
     mixed = qualifying_tasks(base_passes=2, skill_passes=2)
-    for task_id in list(mixed)[:6]:
+    for task_id in list(mixed)[:2]:
         mixed[task_id] = (["passed"] * 2 + ["failed"] * 3, ["passed"] * 3 + ["failed"] * 2)
     db = synthetic_db(tmp_path / "inconclusive", mixed)
     report = run_analysis(db, samples=2000)[1]
@@ -156,6 +156,7 @@ def test_health_and_sample_size_failures_are_inconclusive(tmp_path: Path):
     tasks = qualifying_tasks()
     tasks["task-00"][0][0] = "agent_error"
     tasks["task-01"][0][0] = "grader_error"
+    tasks["task-02"][0][0] = "agent_timeout"
     report = run_analysis(synthetic_db(tmp_path / "health", tasks))[1]
     assert report["verdict"] == "INCONCLUSIVE" and "health_failure" in report["reasons"]
     assert report["health"]["baseline"]["grader_error"] == 1
@@ -178,6 +179,8 @@ def test_final_requires_rule_matching_freeze_and_single_shot(tmp_path: Path, cap
     rule = rule_file(tmp_path)
     assert main(["analyze", "--db", str(db), "--experiment-id", "exp"]) != 0
     assert run_analysis(db, rule)[0] != 0
+    other_rule = tmp_path / "other-rule.toml"
+    other_rule.write_text('min_tasks = 2\n')
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO freezes (freeze_id, manifest_sha256, benchmark_hash, skill_sha256, timestamp, rule_sha256, analysis_code_sha256) VALUES ('bad', 'manifest-hash', 'benchmark-hash', NULL, '2026-10-06T09:00:00+00:00', ?, 'wrong-code')",
@@ -190,6 +193,7 @@ def test_final_requires_rule_matching_freeze_and_single_shot(tmp_path: Path, cap
             "INSERT INTO freezes (freeze_id, manifest_sha256, benchmark_hash, skill_sha256, timestamp, rule_sha256, analysis_code_sha256) VALUES ('good', 'manifest-hash', 'benchmark-hash', NULL, '2026-10-06T09:00:00+00:00', ?, ?)",
             (hashlib.sha256(rule.read_bytes()).hexdigest(), analysis_code_sha256()),
         )
+    assert run_analysis(db, other_rule)[0] != 0
     code, first, _ = run_analysis(db, rule, samples=300, seed=7)
     assert code == 0 and first["verdict"] == "PROMOTE"
     code, second, _ = run_analysis(db, rule, samples=50, seed=999)
@@ -215,3 +219,49 @@ def test_final_recomputation_mismatch_fails_loudly(tmp_path: Path, capsys):
     assert "mismatch" in capsys.readouterr().out.lower()
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM analyses").fetchone()[0] == 1
+
+
+def test_token_interval_resamples_whole_tasks(tmp_path: Path):
+    tasks = {
+        "large": (["failed"] * 20, ["failed"] * 20),
+        "small": (["failed"], ["failed"]),
+    }
+    def tokens(task_id, condition, _trial):
+        if task_id == "large":
+            return 100 if condition == "baseline" else 200
+        return 100 if condition == "baseline" else 50
+
+    report = run_analysis(synthetic_db(tmp_path, tasks, tokens=tokens), rule_file(tmp_path), samples=1000)[1]
+    assert report["telemetry"]["relative_token_ci_lo_pct"] == -50
+    assert report["telemetry"]["relative_token_ci_hi_pct"] == 100
+    assert report["telemetry"]["token_bootstrap_samples_used"] == 1000
+
+
+def test_incomplete_plan_and_unrecognized_status_are_not_silently_discarded(tmp_path: Path, capsys):
+    db = synthetic_db(tmp_path, {"a": (["passed"], ["passed"])})
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE experiment_runs SET run_id=NULL WHERE condition='skill'")
+    report = run_analysis(db, rule_file(tmp_path))[1]
+    assert report["verdict"] == "INCONCLUSIVE"
+    assert "incomplete_plan" in report["reasons"]
+
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE experiment_runs SET run_id='run-1' WHERE condition='skill'")
+        conn.execute("UPDATE runs SET status='future_status' WHERE run_id='run-1'")
+    assert run_analysis(db, rule_file(tmp_path))[0] != 0
+    assert "unknown run status" in capsys.readouterr().out
+
+
+def test_failed_and_invalid_config_count_as_unsuccessful(tmp_path: Path):
+    db = synthetic_db(tmp_path, {"a": (["passed", "invalid_config"], ["failed", "passed"])})
+    report = run_analysis(db, rule_file(tmp_path))[1]
+    assert report["tasks"][0]["baseline_rate"] == 0.5
+    assert report["tasks"][0]["skill_rate"] == 0.5
+    assert report["health"]["baseline"]["status_counts"]["invalid_config"] == 1
+
+
+def test_markdown_report_keeps_table_rows_contiguous(tmp_path: Path):
+    db = synthetic_db(tmp_path, {"a": (["passed"], ["failed"])})
+    out = tmp_path / "report.md"
+    run_analysis(db, rule_file(tmp_path), out=out)
+    assert "| --- | ---: | ---: | ---: | ---: | ---: |\n| a |" in out.read_text()

@@ -78,9 +78,26 @@ when using the skill condition. For `agent = "cmd"`, set `argv`; for
 `agent = "codex"`, set `model` and `reasoning_effort`, with optional
 `codex_bin` and `codex_auth`.
 
-Before a final-phase run, record the manifest, benchmark, and skill hashes with
-`forge freeze MANIFEST.toml --db runs.sqlite` (the same DB named in the
-manifest). Final runs require an exact matching freeze; pilot runs do not.
+Before a final-phase run, freeze the manifest, benchmark, skill, rule, and
+analysis source with `forge freeze MANIFEST.toml --db runs.sqlite --rule RULE.toml`
+(the same DB named in the manifest). Final runs require a matching freeze;
+pilot runs do not.
+
+`forge analyze --db runs.sqlite --experiment-id ID [--rule RULE.toml] [--out report.md]`
+prints a task-paired baseline-versus-skill effect, task-clustered 95% bootstrap
+interval, telemetry, health checks, guardrails, and a reasoned verdict. Defaults
+are 10,000 bootstrap samples and seed 12345; override with `--bootstrap-samples`
+and `--analysis-seed`. Pilot reports are marked development data, not evidence.
+Final analysis requires the same rule and source hashes frozen before the run;
+its first stored result is immutable and later invocations verify recomputation.
+
+The v1 rule defaults are a 3 percentage-point minimum effect, at most 25% more
+median tokens, no analyzed task dropping over 40 points, under 5% crashes in
+each condition, at most 5 points of final infrastructure-error imbalance, and
+at least 10 tasks with 3 valid trials per condition. Final infrastructure errors
+are excluded from success-rate denominators; missing telemetry does not exclude
+outcomes. Forge V1 cannot measure regression of previously-passing tests and
+does not implement a regression-rate guardrail.
 
 For pytest graders, Forge also restores pytest configuration, conftest files,
 and test modules. For unittest graders, it restores test modules, Python startup
