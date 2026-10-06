@@ -71,7 +71,7 @@ def test_pilot_configs_and_metadata(prepared):
     assert manifest_data["max_total_runs"] >= 60
     assert manifest_data["max_total_tokens"] > 0
     assert len(manifest_data["tasks"]) == 10
-    assert hashlib.sha256(Path(manifest_data["skill"]).read_bytes()).hexdigest()
+    assert hashlib.sha256(Path(manifest_data["skill"]).read_bytes()).hexdigest() == "95437cbf0e659d93999fd58863210099ef7fc122b6803005d23757fc4e37ec6d"
     ids = []
     families = Counter()
     for path in sorted((root / "cases").glob("*/case.toml")):
@@ -100,6 +100,23 @@ def test_all_pilot_graders_and_canonical_repos_unchanged(validated):
         rows = conn.execute("SELECT repeats, base_fails, reference_passes, protected_diff_empty, deterministic, reference_hidden, overall_ok FROM task_validations").fetchall()
     assert len(rows) == 10
     assert all(row == (3, 1, 1, 1, 1, 1, 1) for row in rows)
+
+
+def test_materialization_pins_deterministic_commits(prepared, tmp_path):
+    root, _ = prepared
+    second = tmp_path / "pilot"
+    shutil.copytree(root / "cases", second / "cases")
+    shutil.copy2(ROOT / "manifest.template.toml", second / "manifest.template.toml")
+    _load_script("prepare").prepare_pilot(
+        second, model="test-model",
+        skill_path=Path(__file__).resolve().parents[1] / "skills/systematic-debugging/v1/SKILL.md",
+    )
+    for first_path in sorted((root / "generated" / "tasks").glob("*.toml")):
+        import tomllib
+
+        first = tomllib.loads(first_path.read_text())
+        repeated = tomllib.loads((second / "generated" / "tasks" / first_path.name).read_text())
+        assert (first["base_commit"], first["reference_commit"]) == (repeated["base_commit"], repeated["reference_commit"])
 
 
 def test_manifest_and_60_slot_plan_without_agents(validated, monkeypatch, capsys):
