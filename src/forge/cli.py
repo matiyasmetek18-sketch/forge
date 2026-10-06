@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 from forge.runner import RunOnceRequest, run_once
+from forge.validation import validate_task
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,8 +27,16 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--reasoning-effort")
     run_parser.add_argument("--codex-bin", default="codex")
     run_parser.add_argument("--codex-auth")
+    validate_parser = subparsers.add_parser("validate-task")
+    validate_parser.add_argument("task")
+    validate_parser.add_argument("--db", required=True)
+    validate_parser.add_argument("--repeats", type=int, default=3)
 
     args = parser.parse_args(argv)
+    if args.command == "validate-task":
+        ok, message = validate_task(Path(args.task), Path(args.db), args.repeats)
+        print(f"{message} {args.task}")
+        return 0 if ok else 1
     if args.command == "run-once":
         result = run_once(
             RunOnceRequest(

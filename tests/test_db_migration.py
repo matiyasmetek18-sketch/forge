@@ -48,7 +48,7 @@ def test_v1_database_migrates_without_losing_rows(tmp_path) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
 
-    assert version == 3
+    assert version == 4
     assert len(rows) == 2
     assert tuple(rows[1][name] for name in V1_COLUMNS) == old
     assert rows[0]["run_id"] == "new-run"
@@ -70,5 +70,18 @@ def test_v2_database_migrates_with_existing_row(tmp_path) -> None:
         conn.execute("PRAGMA user_version = 2")
     insert_run(db, RunRecord("new", "exp", "task", "1", "baseline", 1, 1, "base", "failed", 0, 1, "[]", "start", "end", "[]", "out", "err", "1"))
     with sqlite3.connect(db) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert conn.execute("SELECT skill_id, agent_name, secret_exposure FROM runs WHERE run_id='prior'").fetchone() == ("old-skill", None, None)
+
+
+def test_v3_database_gains_validations_without_losing_runs(tmp_path) -> None:
+    db = tmp_path / "v3.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE runs (" + ", ".join(f"{name} TEXT" for name in RunRecord.__dataclass_fields__) + ")")
+        conn.execute("INSERT INTO runs (run_id, agent_name) VALUES ('prior', 'codex')")
+        conn.execute("PRAGMA user_version = 3")
+    insert_run(db, RunRecord("new", "exp", "task", "1", "baseline", 1, 1, "base", "failed", 0, 1, "[]", "start", "end", "[]", "out", "err", "1"))
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("SELECT agent_name FROM runs WHERE run_id='prior'").fetchone() == ("codex",)
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name='task_validations'").fetchone() is not None

@@ -188,7 +188,7 @@ def test_schema_idempotent_and_fields_round_trip(tmp_path: Path, tiny_repo: dict
 
     assert first.run_id != second.run_id
     assert count == 2
-    assert version == 3
+    assert version == 4
     assert row["condition"] == "baseline"
     assert row["trial"] == 2
     assert row["seed"] == 99

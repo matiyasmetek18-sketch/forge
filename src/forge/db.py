@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -84,9 +84,31 @@ def insert_run(db_path: Path, record: RunRecord) -> None:
         raise RuntimeError(f"DB failure: {exc}") from exc
 
 
+VALIDATION_COLUMNS = (
+    "validation_id", "task_id", "task_version", "task_hash", "base_commit",
+    "reference_commit", "base_tree_sha", "reference_tree_sha", "grader_cmd",
+    "repeats", "base_fails", "reference_passes", "protected_diff_empty",
+    "deterministic", "reference_hidden", "overall_ok", "details", "timestamp",
+    "forge_version",
+)
+
+
+def insert_validation(db_path: Path, values: dict[str, object]) -> None:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_schema(conn)
+            conn.execute(
+                f"INSERT INTO task_validations ({', '.join(VALIDATION_COLUMNS)}) VALUES ({', '.join('?' for _ in VALIDATION_COLUMNS)})",
+                tuple(values.get(column) for column in VALIDATION_COLUMNS),
+            )
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"DB failure: {exc}") from exc
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, SCHEMA_VERSION):
+    if version not in (0, 1, 2, 3, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported schema version: {version}")
     conn.execute(
         """
@@ -136,3 +158,28 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             if column not in existing:
                 conn.execute(f"ALTER TABLE runs ADD COLUMN {column} {sql_type}")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS task_validations (
+            validation_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            task_version TEXT NOT NULL,
+            task_hash TEXT,
+            base_commit TEXT,
+            reference_commit TEXT,
+            base_tree_sha TEXT,
+            reference_tree_sha TEXT,
+            grader_cmd TEXT NOT NULL,
+            repeats INTEGER NOT NULL,
+            base_fails INTEGER NOT NULL,
+            reference_passes INTEGER NOT NULL,
+            protected_diff_empty INTEGER NOT NULL,
+            deterministic INTEGER NOT NULL,
+            reference_hidden INTEGER NOT NULL,
+            overall_ok INTEGER NOT NULL,
+            details TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            forge_version TEXT NOT NULL
+        )
+        """
+    )
