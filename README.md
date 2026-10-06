@@ -56,6 +56,9 @@ Forge does not reconcile credentials.
 
 ## Experiments
 
+The first development-only debugging benchmark and its preparation commands
+are documented in [the pilot guide](benchmarks/pilot/README.md).
+
 Validate each task with `forge validate-task TASK.toml --db runs.sqlite` before
 running an experiment. A task may set `reference_commit`; validation grades
 fresh base and reference snapshots and records the checks in SQLite.
