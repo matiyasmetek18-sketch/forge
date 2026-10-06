@@ -55,7 +55,7 @@ def validate_task(path: Path, db_path: Path, repeats: int = 3) -> tuple[bool, st
         base, reference, base_tree, reference_tree, fingerprint = task_identity(path, task)
         values.update(task_hash=fingerprint, base_commit=base, reference_commit=reference,
                       base_tree_sha=base_tree, reference_tree_sha=reference_tree)
-        changed = git_output(task.repo_path, "diff", "--no-ext-diff", "--name-only", "-z", base, reference)
+        changed = git_output(task.repo_path, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, reference)
         protected = [
             name for name in (item.decode("utf-8", errors="surrogateescape") for item in changed.split(b"\0") if item)
             if any(_within(name, path) for path in task.grader_paths)
@@ -63,7 +63,7 @@ def validate_task(path: Path, db_path: Path, repeats: int = 3) -> tuple[bool, st
         ]
         details["protected_changes"] = protected
         values["protected_diff_empty"] = int(not protected)
-        diff = git_output(task.repo_path, "diff", "--no-ext-diff", "--no-textconv", "--binary", base, reference)
+        diff = git_output(task.repo_path, "diff", "--no-ext-diff", "--no-renames", "--no-textconv", "--binary", base, reference)
         for label, commit in (("base", base), ("reference", reference)):
             for index in range(repeats):
                 with disposable_snapshot(task.repo_path, commit) as (checkout, snapshot_commit, _):

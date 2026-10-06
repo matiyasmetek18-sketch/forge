@@ -75,7 +75,7 @@ def test_valid_task_records_checks_and_repeats(tmp_path: Path, task_repo, capsys
     assert "ok" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("scenario,expected", [("base_passes", "base_fails"), ("reference_fails", "reference_passes"), ("protected_edit", "protected_diff_empty")])
+@pytest.mark.parametrize("scenario,expected", [("base_passes", "base_fails"), ("reference_fails", "reference_passes"), ("protected_edit", "protected_diff_empty"), ("protected_rename", "protected_diff_empty")])
 def test_validation_rejects_bad_tasks(tmp_path: Path, task_repo, scenario: str, expected: str):
     repo, base, reference = task_repo
     if scenario == "base_passes":
@@ -86,10 +86,14 @@ def test_validation_rejects_bad_tasks(tmp_path: Path, task_repo, scenario: str, 
         reference = base
     elif scenario == "reference_fails":
         reference = base
-    else:
+    elif scenario == "protected_edit":
         (repo / "test_calc.py").write_text("import unittest\nclass TestCalc(unittest.TestCase):\n    def test_ok(self): self.assertTrue(True)\n")
         git(repo, "add", "test_calc.py")
         git(repo, "commit", "-qm", "tampered reference")
+        reference = git(repo, "rev-parse", "HEAD")
+    else:
+        git(repo, "mv", "test_calc.py", "checks.py")
+        git(repo, "commit", "-qm", "rename protected test")
         reference = git(repo, "rev-parse", "HEAD")
     task = task_file(tmp_path, repo, base, reference)
     db = tmp_path / "bad.sqlite"
