@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 
 from forge.runner import RunOnceRequest, run_once
+from forge.experiment import load_manifest, register_experiment
+from forge.task import InvalidConfigError
 from forge.validation import validate_task
 
 
@@ -31,12 +33,25 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("task")
     validate_parser.add_argument("--db", required=True)
     validate_parser.add_argument("--repeats", type=int, default=3)
+    experiment_parser = subparsers.add_parser("run-experiment")
+    experiment_parser.add_argument("manifest")
+    experiment_parser.add_argument("--plan-only", action="store_true")
+    experiment_parser.add_argument("--limit", type=int)
 
     args = parser.parse_args(argv)
     if args.command == "validate-task":
         ok, message = validate_task(Path(args.task), Path(args.db), args.repeats)
         print(f"{message} {args.task}")
         return 0 if ok else 1
+    if args.command == "run-experiment":
+        try:
+            manifest = load_manifest(Path(args.manifest))
+            register_experiment(manifest)
+        except InvalidConfigError as exc:
+            print(f"invalid_config: {exc}")
+            return 2
+        print(f"registered {manifest.experiment_id}")
+        return 0
     if args.command == "run-once":
         result = run_once(
             RunOnceRequest(

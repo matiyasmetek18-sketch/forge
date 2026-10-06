@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -106,9 +106,34 @@ def insert_validation(db_path: Path, values: dict[str, object]) -> None:
         raise RuntimeError(f"DB failure: {exc}") from exc
 
 
+EXPERIMENT_COLUMNS = (
+    "experiment_id", "phase", "manifest_text", "manifest_sha256", "benchmark_hash",
+    "skill_sha256", "agent_name", "agent_version", "model", "reasoning_effort",
+    "python_version", "os", "forge_version", "start_time",
+)
+
+
+def insert_experiment(db_path: Path, values: dict[str, object]) -> None:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_schema(conn)
+            existing = conn.execute("SELECT manifest_sha256 FROM experiments WHERE experiment_id = ?", (values["experiment_id"],)).fetchone()
+            if existing is not None:
+                if existing[0] != values["manifest_sha256"]:
+                    raise ValueError("experiment_id already exists with a different manifest")
+                return
+            conn.execute(
+                f"INSERT INTO experiments ({', '.join(EXPERIMENT_COLUMNS)}) VALUES ({', '.join('?' for _ in EXPERIMENT_COLUMNS)})",
+                tuple(values.get(column) for column in EXPERIMENT_COLUMNS),
+            )
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"DB failure: {exc}") from exc
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+    if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported schema version: {version}")
     conn.execute(
         """
@@ -149,6 +174,26 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             wall_seconds REAL,
             telemetry_status TEXT,
             secret_exposure INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS experiments (
+            experiment_id TEXT PRIMARY KEY,
+            phase TEXT NOT NULL,
+            manifest_text TEXT NOT NULL,
+            manifest_sha256 TEXT NOT NULL,
+            benchmark_hash TEXT NOT NULL,
+            skill_sha256 TEXT,
+            agent_name TEXT NOT NULL,
+            agent_version TEXT,
+            model TEXT,
+            reasoning_effort TEXT,
+            python_version TEXT NOT NULL,
+            os TEXT NOT NULL,
+            forge_version TEXT NOT NULL,
+            start_time TEXT NOT NULL
         )
         """
     )
