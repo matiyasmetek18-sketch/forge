@@ -5,7 +5,8 @@ from pathlib import Path
 import sys
 
 from forge.runner import RunOnceRequest, run_once
-from forge.experiment import load_manifest, register_experiment
+from forge.experiment import load_manifest
+from forge.scheduler import CredentialError, run_experiment
 from forge.task import InvalidConfigError
 from forge.validation import validate_task
 
@@ -46,11 +47,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run-experiment":
         try:
             manifest = load_manifest(Path(args.manifest))
-            register_experiment(manifest)
+            run_experiment(manifest, limit=args.limit, plan_only=args.plan_only)
         except InvalidConfigError as exc:
             print(f"invalid_config: {exc}")
             return 2
-        print(f"registered {manifest.experiment_id}")
+        except CredentialError as exc:
+            print(f"credential_error: {exc}")
+            return 1
         return 0
     if args.command == "run-once":
         result = run_once(

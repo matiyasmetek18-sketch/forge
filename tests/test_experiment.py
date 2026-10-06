@@ -21,6 +21,8 @@ def manifest_file(tmp_path: Path, task: Path, **overrides) -> Path:
         "max_total_runs": 10, "max_total_tokens": 1000,
     }
     data.update(overrides)
+    if data["agent"] == "codex" and "argv" not in overrides:
+        data.pop("argv")
     path = tmp_path / "manifest.toml"
     path.write_text("".join(f"{key} = {json.dumps(value)}\n" for key, value in data.items()))
     return path
@@ -29,6 +31,7 @@ def manifest_file(tmp_path: Path, task: Path, **overrides) -> Path:
 def test_manifest_registration_records_provenance(tmp_path: Path, task_repo):
     repo, base, reference = task_repo
     task = task_file(tmp_path, repo, base, reference)
+    assert main(["validate-task", str(task), "--db", str(tmp_path / "experiment.sqlite"), "--repeats", "1"]) == 0
     manifest = manifest_file(tmp_path, task)
     assert main(["run-experiment", str(manifest), "--plan-only"]) == 0
     with sqlite3.connect(tmp_path / "experiment.sqlite") as conn:
@@ -47,6 +50,7 @@ def test_manifest_registration_records_provenance(tmp_path: Path, task_repo):
 def test_changed_manifest_same_experiment_id_is_rejected(tmp_path: Path, task_repo, capsys):
     repo, base, reference = task_repo
     task = task_file(tmp_path, repo, base, reference)
+    assert main(["validate-task", str(task), "--db", str(tmp_path / "experiment.sqlite"), "--repeats", "1"]) == 0
     manifest = manifest_file(tmp_path, task)
     assert main(["run-experiment", str(manifest), "--plan-only"]) == 0
     manifest_file(tmp_path, task, seed=20)

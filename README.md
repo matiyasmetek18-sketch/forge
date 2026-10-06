@@ -54,6 +54,20 @@ Codex may refresh or rotate the copied credential during a run. If that
 invalidates the user's real login, they may need to run `codex login` again;
 Forge does not reconcile credentials.
 
+## Experiments
+
+Validate each task with `forge validate-task TASK.toml --db runs.sqlite` before
+running an experiment. A task may set `reference_commit`; validation grades
+fresh base and reference snapshots and records the checks in SQLite.
+
+`forge run-experiment MANIFEST.toml` uses a seeded, persisted plan. Use
+`--plan-only` to inspect it or `--limit N` to execute at most N attempts now;
+repeat the command to resume. Manifest paths are relative to the manifest.
+Runs with `infra_error` are retried at most once. Every other outcome,
+including `agent_error` and `agent_timeout`, stands and counts as unsuccessful.
+The token budget checks usage already recorded before each run, so one run can
+cross the cap; runs without telemetry still count against `max_total_runs`.
+
 For pytest graders, Forge also restores pytest configuration, conftest files,
 and test modules. For unittest graders, it restores test modules, Python startup
 hooks, and modules that shadow the standard library. The grader command must

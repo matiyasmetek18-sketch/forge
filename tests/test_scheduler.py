@@ -8,6 +8,7 @@ import sys
 from forge.cli import main
 from test_experiment import manifest_file
 from test_validation import task_repo, task_file
+from test_run_once import _codex_stub
 
 
 def ready_task(tmp_path: Path, task_repo, db: Path, *, task_id: str = "sample") -> Path:
@@ -117,3 +118,26 @@ def test_one_failed_run_does_not_abort_other_planned_runs(tmp_path: Path, task_r
     manifest = manifest_file(tmp_path, task, trials_per_condition=2)
     assert main(["run-experiment", str(manifest)]) == 0
     assert [r["status"] for r in rows(db, "runs")] == ["failed", "failed"]
+
+
+def test_token_budget_stops_after_recorded_usage(tmp_path: Path, task_repo, capsys):
+    db = tmp_path / "experiment.sqlite"
+    task = ready_task(tmp_path, task_repo, db)
+    auth = tmp_path / "auth.json"
+    auth.write_text('{"token":"sentinel-auth-value-1234567890"}')
+    stub = _codex_stub(tmp_path, "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':8,'cached_input_tokens':0,'output_tokens':8}}))")
+    manifest = manifest_file(tmp_path, task, agent="codex", model="gpt-test", reasoning_effort="low", codex_bin=str(stub), codex_auth=str(auth), trials_per_condition=3, max_total_tokens=10)
+    assert main(["run-experiment", str(manifest)]) == 0
+    assert len(rows(db, "runs")) == 1
+    assert rows(db, "runs")[0]["input_tokens"] == 8
+    assert "max_total_tokens" in capsys.readouterr().out
+
+
+def test_missing_codex_auth_stops_before_agent(tmp_path: Path, task_repo, capsys):
+    db = tmp_path / "experiment.sqlite"
+    task = ready_task(tmp_path, task_repo, db)
+    stub = _codex_stub(tmp_path, "raise AssertionError('must not run')")
+    manifest = manifest_file(tmp_path, task, agent="codex", model="gpt-test", reasoning_effort="low", codex_bin=str(stub), codex_auth=str(tmp_path / "missing-auth.json"))
+    assert main(["run-experiment", str(manifest)]) != 0
+    assert "credential_error" in capsys.readouterr().out
+    assert rows(db, "runs") == []

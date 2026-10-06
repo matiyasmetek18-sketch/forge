@@ -5,7 +5,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -118,10 +118,12 @@ def insert_experiment(db_path: Path, values: dict[str, object]) -> None:
         with sqlite3.connect(db_path) as conn:
             conn.execute("BEGIN IMMEDIATE")
             _ensure_schema(conn)
-            existing = conn.execute("SELECT manifest_sha256 FROM experiments WHERE experiment_id = ?", (values["experiment_id"],)).fetchone()
+            existing = conn.execute("SELECT manifest_sha256, benchmark_hash, skill_sha256 FROM experiments WHERE experiment_id = ?", (values["experiment_id"],)).fetchone()
             if existing is not None:
                 if existing[0] != values["manifest_sha256"]:
                     raise ValueError("experiment_id already exists with a different manifest")
+                if existing[1:] != (values["benchmark_hash"], values["skill_sha256"]):
+                    raise ValueError("experiment inputs changed under the same manifest")
                 return
             conn.execute(
                 f"INSERT INTO experiments ({', '.join(EXPERIMENT_COLUMNS)}) VALUES ({', '.join('?' for _ in EXPERIMENT_COLUMNS)})",
@@ -133,7 +135,7 @@ def insert_experiment(db_path: Path, values: dict[str, object]) -> None:
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
+    if version not in (0, 1, 2, 3, 4, 5, SCHEMA_VERSION):
         raise RuntimeError(f"unsupported schema version: {version}")
     conn.execute(
         """
@@ -225,6 +227,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             details TEXT NOT NULL,
             timestamp TEXT NOT NULL,
             forge_version TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS experiment_runs (
+            experiment_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            condition TEXT NOT NULL,
+            trial INTEGER NOT NULL,
+            planned_position INTEGER NOT NULL,
+            run_seed INTEGER NOT NULL,
+            run_id TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (experiment_id, task_id, condition, trial),
+            UNIQUE (experiment_id, planned_position)
         )
         """
     )
