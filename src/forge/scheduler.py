@@ -7,7 +7,7 @@ import sqlite3
 
 from forge.codex_adapter import auth_source
 from forge.db import _ensure_schema
-from forge.experiment import Manifest, register_experiment
+from forge.experiment import Manifest, load_manifest, register_experiment
 from forge.freeze import require_freeze
 from forge.runner import RunOnceRequest, run_once
 from forge.task import InvalidConfigError, load_task
@@ -139,11 +139,20 @@ def _credential_failed(manifest: Manifest, run_id: str) -> bool:
     return any(marker in stderr for marker in (b"authentication failed", b"not logged in", b"refresh token"))
 
 
+def _require_unchanged_inputs(manifest: Manifest) -> None:
+    current = load_manifest(manifest.path)
+    if (current.sha256, current.benchmark_hash, current.skill_sha256, current.agent_version) != (
+        manifest.sha256, manifest.benchmark_hash, manifest.skill_sha256, manifest.agent_version,
+    ):
+        raise InvalidConfigError("experiment inputs changed after planning")
+
+
 def run_experiment(manifest: Manifest, *, limit: int | None = None, plan_only: bool = False) -> None:
     if limit is not None and limit < 1:
         raise InvalidConfigError("--limit must be greater than zero")
     require_freeze(manifest)
     preflight(manifest)
+    _require_unchanged_inputs(manifest)
     register_experiment(manifest)
     persist_plan(manifest)
     _reconcile(manifest)
@@ -172,6 +181,7 @@ def run_experiment(manifest: Manifest, *, limit: int | None = None, plan_only: b
             if tokens >= manifest.max_total_tokens:
                 stop_reason = "max_total_tokens reached"
                 break
+            _require_unchanged_inputs(manifest)
             if manifest.agent == "codex":
                 try:
                     auth = json.loads(auth_source(manifest.codex_auth).read_bytes())

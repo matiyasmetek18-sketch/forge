@@ -153,3 +153,16 @@ def test_malformed_codex_auth_stops_before_agent(tmp_path: Path, task_repo, caps
     assert main(["run-experiment", str(manifest)]) != 0
     assert "credential_error" in capsys.readouterr().out
     assert rows(db, "runs") == []
+
+
+def test_skill_changed_between_runs_stops_before_next_trial(tmp_path: Path, task_repo, capsys):
+    db = tmp_path / "experiment.sqlite"
+    task = ready_task(tmp_path, task_repo, db)
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Original instructions.\n")
+    agent = tmp_path / "agent.py"
+    agent.write_text(f"from pathlib import Path\nPath({str(skill)!r}).write_text('Changed instructions.\\n')\n")
+    manifest = manifest_file(tmp_path, task, conditions=["baseline", "skill"], skill=str(skill), argv=[sys.executable, str(agent)])
+    assert main(["run-experiment", str(manifest)]) != 0
+    assert "inputs changed" in capsys.readouterr().out
+    assert len(rows(db, "runs")) == 1

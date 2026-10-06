@@ -67,6 +67,8 @@ Runs with `infra_error` are retried at most once. Every other outcome,
 including `agent_error` and `agent_timeout`, stands and counts as unsuccessful.
 The token budget checks usage already recorded before each run, so one run can
 cross the cap; runs without telemetry still count against `max_total_runs`.
+Forge stops if manifest, task, skill, or Codex version inputs drift between
+planned runs.
 
 A manifest uses flat TOML keys: `experiment_id`, `phase` (`pilot` or `final`),
 `db`, `tasks`, `conditions`, `trials_per_condition`, `seed`, `agent`,
