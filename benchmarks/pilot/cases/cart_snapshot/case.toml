@@ -2,4 +2,4 @@ task_id = "cart_snapshot"
 family = "state-mutation"
 phase = "pilot"
 requires_network = false
-agent_prompt = "A cart unexpectedly changes when callers mutate the list passed to its constructor or a list returned by items(). The cart should own its state, while add() remains the way to change it. Find and repair the aliasing defect."
+agent_prompt = "A cart unexpectedly changes when callers mutate the list passed to its constructor or a list returned by items(). The cart should own its state, while add() remains the way to change it. Investigate and repair the behavior."
