@@ -150,3 +150,8 @@ regressions of tests that already passed, semantic code quality beyond the
 grader, external validity to large repositories, or adversaries with knowledge
 of host paths. These limits are part of the reported result, not footnotes to
 it.
+
+## License
+
+Copyright 2026 Matiyas Dawit. Licensed under the
+[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
