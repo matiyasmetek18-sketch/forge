@@ -1,0 +1,5 @@
+task_id = "explicit_timeout"
+family = "error-edge"
+phase = "final"
+requires_network = false
+agent_prompt = "resolve_timeout uses the default only when no timeout was supplied. An explicit zero means immediate timeout and must remain zero; negative, boolean, and nonnumeric values are invalid. Repair default selection without changing positive values."

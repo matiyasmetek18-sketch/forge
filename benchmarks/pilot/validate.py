@@ -11,7 +11,7 @@ def validate_pilot(root: Path) -> None:
     tasks = sorted((root / "generated" / "tasks").glob("*.toml"))
     if len(tasks) != 10:
         raise ValueError("materialize all ten pilot tasks before validation")
-    db = root / "generated" / "pilot.sqlite"
+    db = root / "generated" / "pilot-v2.sqlite"
     failures = []
     for task in tasks:
         ok, message = validate_task(task, db, repeats=3)

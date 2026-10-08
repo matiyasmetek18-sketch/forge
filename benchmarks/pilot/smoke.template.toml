@@ -1,4 +1,4 @@
-experiment_id = "systematic-debugging-smoke-v1"
+experiment_id = "systematic-debugging-smoke-v2"
 phase = "pilot"
 conditions = ["baseline", "skill"]
 trials_per_condition = 1
@@ -6,4 +6,4 @@ seed = 20261007
 agent = "codex"
 reasoning_effort = "medium"
 max_total_runs = 8
-max_total_tokens = 150000
+max_total_tokens = 1250000

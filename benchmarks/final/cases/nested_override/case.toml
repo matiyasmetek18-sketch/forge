@@ -1,0 +1,5 @@
+task_id = "nested_override"
+family = "state-mutation"
+phase = "final"
+requires_network = false
+agent_prompt = "Settings.override temporarily changes one key and must restore the value active on entry, including under nested overrides and exceptions. Repair nested restoration without suppressing exceptions."

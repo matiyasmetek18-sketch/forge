@@ -1,0 +1,5 @@
+task_id = "stream_decode"
+family = "integration-boundary"
+phase = "final"
+requires_network = false
+agent_prompt = "UTF-8 response bytes arrive in arbitrary chunks, including splits inside multibyte characters. decode_chunks must return the exact text and still reject malformed or incomplete UTF-8. Repair chunk-boundary handling."

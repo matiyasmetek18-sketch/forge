@@ -1,0 +1,5 @@
+task_id = "smoke_average"
+family = "algorithm-logic"
+phase = "smoke"
+requires_network = false
+agent_prompt = "mean should return the arithmetic mean as a float for a non-empty numeric sequence. It currently truncates fractional results. Repair it and preserve the empty-input error."

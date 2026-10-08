@@ -1,0 +1,5 @@
+task_id = "memoized_failure"
+family = "error-edge"
+phase = "final"
+requires_network = false
+agent_prompt = "get_or_compute must cache successful results, including None, but a failed computation must leave no cache entry so a later call can retry. Repair the poisoned-cache behavior while preserving one computation per successful key."

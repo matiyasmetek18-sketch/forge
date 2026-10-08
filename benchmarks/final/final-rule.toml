@@ -1,0 +1,7 @@
+rule_version = "v1"
+min_effect_pp = 3.0
+max_token_increase_pct = 25.0
+max_task_drop_pp = 40.0
+max_crash_rate_pct = 5.0
+min_tasks = 10
+min_trials_per_condition = 3

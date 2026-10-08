@@ -109,7 +109,7 @@ def prepare_pilot(root: Path, *, model: str, skill_path: Path) -> Path:
     manifest = generated / "manifest.toml"
     manifest.write_text(
         template + "\n" + "".join(f"{key} = {json.dumps(value)}\n" for key, value in {
-            "db": str(generated / "pilot.sqlite"),
+            "db": str(generated / "pilot-v2.sqlite"),
             "tasks": [str(path) for path in task_paths],
             "skill": str(skill_path),
             "skill_id": "systematic-debugging-v1",
@@ -119,7 +119,7 @@ def prepare_pilot(root: Path, *, model: str, skill_path: Path) -> Path:
     smoke_template = (root / "smoke.template.toml").read_text(encoding="utf-8")
     (generated / "smoke.toml").write_text(
         smoke_template + "\n" + "".join(f"{key} = {json.dumps(value)}\n" for key, value in {
-            "db": str(generated / "smoke.sqlite"),
+            "db": str(generated / "smoke-v2.sqlite"),
             "tasks": [str(tasks_dir / f"{task_id}.toml") for task_id in SMOKE_TASK_IDS],
             "skill": str(skill_path),
             "skill_id": "systematic-debugging-v1",

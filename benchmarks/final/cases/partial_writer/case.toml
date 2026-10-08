@@ -1,0 +1,5 @@
+task_id = "partial_writer"
+family = "integration-boundary"
+phase = "final"
+requires_network = false
+agent_prompt = "A stream writer may accept fewer bytes than requested. write_all must continue until every byte is written, preserve order, and raise an error if the writer makes no progress. Repair the adapter without assuming a single write completes."

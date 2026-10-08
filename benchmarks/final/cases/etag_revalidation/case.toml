@@ -1,0 +1,5 @@
+task_id = "etag_revalidation"
+family = "integration-boundary"
+phase = "final"
+requires_network = false
+agent_prompt = "A conditional JSON fetch mishandles HTTP 304 responses. A 200 response must decode and refresh cached data and ETag; a 304 must reuse an existing cache without decoding a body; other statuses and cacheless 304s are errors. Repair the boundary adapter."

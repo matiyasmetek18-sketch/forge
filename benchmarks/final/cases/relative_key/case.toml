@@ -1,0 +1,5 @@
+task_id = "relative_key"
+family = "input-validation"
+phase = "final"
+requires_network = false
+agent_prompt = "Storage keys must be non-empty relative POSIX paths. Empty segments, '.', '..', backslashes, and absolute paths are invalid; valid segments must be preserved exactly. Repair normalize_key so invalid keys cannot escape or collapse path boundaries."

@@ -1,4 +1,4 @@
-experiment_id = "systematic-debugging-pilot-v1"
+experiment_id = "systematic-debugging-pilot-v2"
 phase = "pilot"
 conditions = ["baseline", "skill"]
 trials_per_condition = 3
@@ -6,4 +6,4 @@ seed = 20261006
 agent = "codex"
 reasoning_effort = "medium"
 max_total_runs = 66
-max_total_tokens = 1500000
+max_total_tokens = 15000000

@@ -1,0 +1,5 @@
+task_id = "stable_topk"
+family = "algorithm-logic"
+phase = "final"
+requires_network = false
+agent_prompt = "Select the k highest-scoring records. Higher scores rank first, but equal scores must retain their original input order; records must not be mutated. Repair tie handling and preserve validation for invalid k."

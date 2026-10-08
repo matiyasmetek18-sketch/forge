@@ -1,0 +1,5 @@
+task_id = "lru_refresh"
+family = "state-mutation"
+phase = "final"
+requires_network = false
+agent_prompt = "The bounded cache evicts recently used entries. Successful get operations and updates of existing keys must refresh recency; only inserting a new key beyond capacity evicts the least recently used key. Repair its state transitions."

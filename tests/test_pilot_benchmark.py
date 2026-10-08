@@ -96,7 +96,7 @@ def test_pilot_configs_and_metadata(prepared):
 def test_all_pilot_graders_and_canonical_repos_unchanged(validated):
     root, _, before, after = validated
     assert after == before
-    db = root / "generated" / "pilot.sqlite"
+    db = root / "generated" / "pilot-v2.sqlite"
     with sqlite3.connect(db) as conn:
         rows = conn.execute("SELECT repeats, base_fails, reference_passes, protected_diff_empty, deterministic, reference_hidden, overall_ok FROM task_validations").fetchall()
     assert len(rows) == 10
@@ -151,7 +151,7 @@ def test_smoke_manifest_and_six_slot_plan_without_agents(validated, monkeypatch,
         pilot.model, pilot.reasoning_effort, pilot.agent, pilot.skill_sha256,
     )
     assert smoke.trials_per_condition == 1
-    assert smoke.max_total_runs == 8 and smoke.max_total_tokens == 150000
+    assert smoke.max_total_runs == 8 and smoke.max_total_tokens == 1_250_000
     assert {load_task(path).task_id for path in smoke.tasks} == {"parse_tags", "event_dispatch", "weighted_route"}
     plan = planned_runs(smoke)
     assert len(plan) == 6

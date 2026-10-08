@@ -1,0 +1,5 @@
+task_id = "cleanup_precedence"
+family = "error-edge"
+phase = "final"
+requires_network = false
+agent_prompt = "run_with_resource must always close its resource. If the action fails and close also fails, preserve the action exception as the primary error; if only close fails, report the close error. Repair exception precedence without suppressing successful results."

@@ -1,0 +1,5 @@
+task_id = "typed_payload"
+family = "input-validation"
+phase = "final"
+requires_network = false
+agent_prompt = "Job payloads require a non-empty string name and may include retries (an integer from 0 to 5) and enabled (a boolean). Unknown fields and values of the wrong exact type must be rejected. Repair validation while preserving defaults for omitted optional fields."

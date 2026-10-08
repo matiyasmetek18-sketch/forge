@@ -1,0 +1,5 @@
+task_id = "money_amount"
+family = "input-validation"
+phase = "final"
+requires_network = false
+agent_prompt = "Payment amounts use canonical ASCII fixed-point text and return integer cents. Accept 0.01 through 10000.00 with at most two fractional digits; reject signs, exponents, non-finite values, excess precision, and leading-zero spellings. Repair the parser while preserving exact cents."

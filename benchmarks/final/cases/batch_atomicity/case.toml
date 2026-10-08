@@ -1,0 +1,5 @@
+task_id = "batch_atomicity"
+family = "state-mutation"
+phase = "final"
+requires_network = false
+agent_prompt = "Ledger.apply_batch must be atomic: every named delta is applied in order only if no balance would become negative. Invalid accounts or overdrafts must leave all balances exactly unchanged. Repair the partial-mutation behavior."

@@ -1,0 +1,5 @@
+task_id = "smoke_headers"
+family = "integration-boundary"
+phase = "smoke"
+requires_network = false
+agent_prompt = "HTTP header names are case-insensitive. Repair get_header so callers can retrieve a uniquely named header regardless of casing while preserving KeyError for missing names."

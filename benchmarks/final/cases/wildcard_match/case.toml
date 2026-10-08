@@ -1,0 +1,5 @@
+task_id = "wildcard_match"
+family = "algorithm-logic"
+phase = "final"
+requires_network = false
+agent_prompt = "Implement full-string wildcard matching where '?' matches exactly one character and '*' matches any sequence, including empty. Matching is incorrect for some combinations of multiple wildcards. Repair it without treating pattern characters as regular expressions."

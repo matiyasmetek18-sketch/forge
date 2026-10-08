@@ -1,0 +1,5 @@
+task_id = "smoke_counter"
+family = "state-mutation"
+phase = "smoke"
+requires_network = false
+agent_prompt = "Counter.reset must return the count accumulated before resetting it to zero. Repair the state transition while preserving increment behavior."

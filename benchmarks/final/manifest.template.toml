@@ -1,0 +1,9 @@
+experiment_id = "systematic-debugging-final-v1"
+phase = "final"
+conditions = ["baseline", "skill"]
+trials_per_condition = 5
+seed = 20261008
+agent = "codex"
+reasoning_effort = "medium"
+max_total_runs = 160
+max_total_tokens = 45000000

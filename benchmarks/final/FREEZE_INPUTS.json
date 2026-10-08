@@ -1,0 +1,76 @@
+{
+  "package_version": "final-v1",
+  "status": "ready_to_freeze",
+  "manifest": {
+    "path": "benchmarks/final/generated/manifest.toml",
+    "sha256": "45afbb93e20415086b3b0019da6ffe66224986f087939c4b6d1d9e956ff3fbe2",
+    "experiment_id": "systematic-debugging-final-v1",
+    "phase": "final",
+    "planned_observations": 150,
+    "conditions": ["baseline", "skill"],
+    "trials_per_condition": 5,
+    "seed": 20261008,
+    "max_total_runs": 160,
+    "max_total_tokens": 45000000
+  },
+  "skill": {
+    "path": "skills/systematic-debugging/v2/SKILL.md",
+    "id": "systematic-debugging-v2",
+    "sha256": "a08970b2b2b04a09924097f31537899d1631d289d333408f889407b03a58676e"
+  },
+  "agent": {
+    "name": "codex",
+    "version": "codex-cli 0.157.1",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "sandbox": "workspace-write",
+    "prompt_template_version": 1
+  },
+  "benchmark": {
+    "version": "final-v1",
+    "sha256": "66e96af2fdc51f44d6250d3c8ce8d7cd260da14913f88c9b019bfdeaffacc825",
+    "task_count": 15,
+    "grader_version": "final-v1",
+    "grader_sha256": "26fe489737f1581595162e0221a2fd7c567282ae1aded4501d18e3706259ee91"
+  },
+  "promotion_rule": {
+    "path": "benchmarks/final/final-rule.toml",
+    "sha256": "26828d797d81dc686b2a441c8afb61d66e3579f7d3631061bef0076e448a5734",
+    "max_token_increase_pct": 25.0
+  },
+  "analysis": {
+    "sha256": "268fcd20a41992d76d53327f8aeaed6559109771544e8ec2bf7e50fc75a4f25a",
+    "bootstrap_samples": 10000,
+    "analysis_seed": 12345,
+    "clustering": "task"
+  },
+  "environment": {
+    "forge_version": "0.1.0",
+    "python_version": "3.13.9",
+    "platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+    "runtime_dependencies": "standard-library-only"
+  },
+  "tasks": [
+    {"task_id": "batch_atomicity", "base_commit": "dbf4fa60219a75f4db881e1147e22ca43d8535e4", "reference_commit": "5f2a9be7d5882cfc62d73409d3def78c061c0355"},
+    {"task_id": "cleanup_precedence", "base_commit": "5afe897e1891b64fdf38153056ae3a0cf6871e07", "reference_commit": "55157faa3965936973cf83d76069cd6db1c8c2f1"},
+    {"task_id": "etag_revalidation", "base_commit": "69ca43c148bc6044d1c3cf94907a49ad680da917", "reference_commit": "0b09016fe0f2eca6da5e65ee8a80d29efe1c58df"},
+    {"task_id": "explicit_timeout", "base_commit": "0649fd53f271c625d1d8e17b7dba118cd5bbbcd5", "reference_commit": "4241a823c8d8897ee3c9431663de74100a0db956"},
+    {"task_id": "lru_refresh", "base_commit": "bfe67c850e95610a06c16d942d9b848d01f7395b", "reference_commit": "638c8a59dea24565a480c6e1802fa1adf71bce3e"},
+    {"task_id": "memoized_failure", "base_commit": "ddecf24eb018c8ccc64d513a2dff6b70d52815fd", "reference_commit": "8002f9ca2ca7b4d1d6045ada69a1c920973d3990"},
+    {"task_id": "money_amount", "base_commit": "936a77f3c86fbec8d76d5d4d82c921b62db27b87", "reference_commit": "f74cfa314e414eeb422e8122c51a3d4cbeacb47c"},
+    {"task_id": "nested_override", "base_commit": "0169156a2159c14146d27bd1c0f0d03130871a45", "reference_commit": "c0caf6afcee5d0aaa40e20df2ba25178d51d2ef1"},
+    {"task_id": "partial_writer", "base_commit": "129a9109b50e3e4bad064b91ba323d7b791da351", "reference_commit": "05b04a0463c78d4dd14622a4de6bb0b36126f48f"},
+    {"task_id": "quota_apportion", "base_commit": "a1c4f28936b1ad35432b81e0219589817542e1d3", "reference_commit": "145442d658e40b580d5739dfbc9b15d0ff088fb2"},
+    {"task_id": "relative_key", "base_commit": "d8c7f6a86c1761322a3b6c451fb2cb57b5ad0d56", "reference_commit": "c7d3ba45c03260888b96b45eac3124e79fbfbed7"},
+    {"task_id": "stable_topk", "base_commit": "d95f18acbe705528460529b195284fd87e7d7b61", "reference_commit": "5adb14a21ade158d28c38733e8291c8a9bde4ba6"},
+    {"task_id": "stream_decode", "base_commit": "8c95d4113aa34b4e565112b1fcafbb674c87fd6b", "reference_commit": "8e4ef60ad534f930cae04831afb25b850926ffc7"},
+    {"task_id": "typed_payload", "base_commit": "8a222bd412677b15b61f9ef1545a887658a12fa3", "reference_commit": "da8c052e427f33a2126f53e61a9f536713e2205a"},
+    {"task_id": "wildcard_match", "base_commit": "a649b107ccd11b21cfc3619f59132302f4de583f", "reference_commit": "c24bd36bf5d0ad9b302aff49373a71f6ef30e306"}
+  ],
+  "smoke": {
+    "experiment_id": "systematic-debugging-final-smoke-v1",
+    "planned_observations": 6,
+    "evidence_eligible": false,
+    "task_ids": ["smoke_average", "smoke_counter", "smoke_headers"]
+  }
+}

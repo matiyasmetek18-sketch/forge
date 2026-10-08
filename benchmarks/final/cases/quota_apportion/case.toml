@@ -1,0 +1,5 @@
+task_id = "quota_apportion"
+family = "algorithm-logic"
+phase = "final"
+requires_network = false
+agent_prompt = "Allocate an integer total proportionally across nonnegative weights. Outputs must sum exactly to total using largest remainders, with lower input index winning equal remainders. Repair the allocation while preserving deterministic ties and zero-total behavior."
