@@ -1,113 +1,152 @@
 # Forge
 
-Forge is an evidence-driven evaluation runner for coding-agent procedural skills.
-Each run exports the tree at `base_commit` into a disposable Git repository
-with one new commit and no remote or earlier history. Forge restores protected
-grader files from that snapshot commit, grades the result, records it in SQLite,
-and cleans up.
+Forge is a standard-library runtime for controlled, evidence-driven evaluation
+of procedural skills for coding agents. It asks a narrow research question:
+does giving the same agent a fixed procedure improve task success over an
+otherwise identical baseline, and at what operational cost?
 
-## Test
+Forge was built because a prompt comparison is only useful when repository
+state, model settings, grading, trial order, telemetry, and decision rules are
+controlled and recoverable. It creates a seeded run plan, isolates every run in
+a history-free Git snapshot, restores protected grader inputs after the agent
+exits, and records append-only observations in SQLite.
+
+## V1 Result
+
+The frozen held-out experiment `systematic-debugging-final-v1` evaluated 15
+tasks with five trials per condition using `gpt-5.6-sol` at medium reasoning.
+Both baseline and Systematic Debugging v2 passed 75/75 observations. The mean
+task-level success effect was 0.00 percentage points (task-clustered 95% CI
+0.00 to 0.00), so the frozen verdict was **REJECT: effect_below_threshold**.
+
+This rejects promotion under the precommitted rule; it does not establish that
+procedural skills are universally ineffective. All baseline runs passed, so the
+benchmark saturated and could not reveal a positive binary success effect.
+Skill runs used 4.09% fewer median tokens, but the CI was -14.46% to +3.17% and
+this comparison does not identify the effect of the pilot-informed v2 revision
+relative to v1. See the [research report](docs/RESEARCH_REPORT.md) and
+[reproducibility audit](docs/REPRODUCIBILITY_AUDIT.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Task TOML and pinned commit] --> B[Seeded experiment plan]
+    S[Optional fixed skill] --> B
+    B --> C[History-free one-commit snapshot]
+    C --> D[Baseline or skill prompt]
+    D --> E[Agent process]
+    E --> F[Restore protected grader inputs]
+    F --> G[Condition-blind grader]
+    G --> H[(SQLite runs and telemetry)]
+    H --> I[Frozen rule and analysis]
+    I --> J[PROMOTE / REJECT / INCONCLUSIVE]
+```
+
+The baseline receives the task prompt byte-for-byte. The treatment receives a
+versioned template containing the fixed skill followed by the same task prompt.
+Both conditions otherwise share the task snapshot, model, reasoning effort,
+environment allowlist, sandbox, timeouts, and grader.
+
+Each run exports only the tree at `base_commit`, initializes a fresh repository
+with one commit and no remote, and deletes it afterward. Before grading, Forge
+restores or removes protected tests, Python startup hooks, stdlib-shadowing
+modules, and relevant test configuration to their snapshot state. The grader
+does not receive the condition label. Exit 0 means solved, exit 1 means not
+solved, and any other exit is `grader_error`, following pytest conventions.
+
+## Install And Test
+
+Forge requires Python 3.11 or newer and Git. Runtime code has no third-party
+dependencies.
 
 ```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -e ".[dev]"
 pytest
 ```
 
-## Run Once
+## Small Experiment
+
+First validate each task definition and its optional reference commit:
 
 ```sh
-forge run-once TASK.toml \
-  --condition baseline \
-  --trial 1 \
-  --seed 123 \
-  --experiment-id EXPERIMENT \
-  --db forge.sqlite \
-  --agent-cmd python stub_agent.py
+forge validate-task tasks/example.toml --db runs.sqlite
 ```
 
-For a skill run, use `--condition skill --skill /path/to/SKILL.md`.
-`--skill-id NAME` optionally overrides the ID; otherwise `SKILL.md` uses its
-parent directory name and other skill files use their file stem.
-`--skill` is invalid for baseline runs. Baseline passes the task prompt unchanged
-in `FORGE_AGENT_PROMPT`; skill runs prepend the versioned skill template and
-skill text. Forge does not copy the skill file into the run repository.
-SQLite records the final prompt and its SHA-256, the skill file's SHA-256 and
-ID, template version, and snapshot tree SHA. Existing version 1 databases
-migrate in place; older rows keep NULL in the new columns.
+A minimal command-adapter manifest is flat TOML:
 
-To evaluate with Codex instead of `--agent-cmd`, use `--agent codex --model MODEL
---reasoning-effort EFFORT`. `--codex-bin` defaults to `codex`; `--codex-auth`
-defaults to `auth.json` in the user's `CODEX_HOME` or `~/.codex`. Forge passes
-the final prompt on stdin, runs Codex with `workspace-write`, and records JSONL
-usage, tool counts, elapsed time, the requested model and effort, and the
-`codex --version` result. Version 1 and 2 databases migrate in place.
+```toml
+experiment_id = "example-pilot-v1"
+phase = "pilot"
+db = "runs.sqlite"
+tasks = ["tasks/example.toml"]
+conditions = ["baseline", "skill"]
+skill = "skills/example/SKILL.md"
+skill_id = "example-v1"
+trials_per_condition = 3
+seed = 12345
+agent = "cmd"
+argv = ["python3", "stub_agent.py"]
+max_total_runs = 8
+max_total_tokens = 1000000
+```
 
-Codex receives a temporary home containing only a private copy of `auth.json`;
-Forge deletes it after the run. This excludes personal Codex settings from the
-experimental conditions, but **does not protect the real home**: sandboxed
-commands can read the real auth file. Forge detects exact auth string values of
-at least 20 characters in logs and checkout files, redacts matches in stored
-logs, and records `secret_exposure=1`. Encoded, split, or transformed secrets
-are not detected. Logs default to a temporary directory outside the repo and
-must never be committed or shared.
+Inspect the persisted plan without launching an agent, then run or resume it:
 
-Codex may refresh or rotate the copied credential during a run. If that
-invalidates the user's real login, they may need to run `codex login` again;
-Forge does not reconcile credentials.
+```sh
+forge run-experiment experiment.toml --plan-only
+forge run-experiment experiment.toml
+```
 
-## Experiments
+For Codex, set `agent = "codex"`, an explicit `model`, and
+`reasoning_effort`. Forge passes the prompt on stdin to `codex exec --json
+--sandbox workspace-write`, uses a private temporary `CODEX_HOME` containing
+only a copied `auth.json`, and records tokens, command/file-change counts,
+latency, model, effort, and CLI version. Run logs may contain secrets if an
+agent reads credentials; never commit or share them.
 
-The first development-only debugging benchmark and its preparation commands
-are documented in [the pilot guide](benchmarks/pilot/README.md).
+## Freeze And Analyze
 
-Validate each task with `forge validate-task TASK.toml --db runs.sqlite` before
-running an experiment. A task may set `reference_commit`; validation grades
-fresh base and reference snapshots and records the checks in SQLite.
+Pilot analysis is development information. A final experiment must be frozen
+before its first run, binding the manifest, benchmark, skill, promotion rule,
+and analysis source hashes:
 
-`forge run-experiment MANIFEST.toml` uses a seeded, persisted plan. Use
-`--plan-only` to inspect it or `--limit N` to execute at most N attempts now;
-repeat the command to resume. `db`, `tasks`, `skill`, and `codex_auth` paths
-are relative to the manifest; `argv` is passed directly to the run checkout.
-Runs with `infra_error` are retried at most once. Every other outcome,
-including `agent_error` and `agent_timeout`, stands and counts as unsuccessful.
-The token budget checks usage already recorded before each run, so one run can
-cross the cap; runs without telemetry still count against `max_total_runs`.
-Forge stops if manifest, task, skill, or Codex version inputs drift between
-planned runs.
+```sh
+forge freeze final.toml --db final.sqlite --rule final-rule.toml
+forge run-experiment final.toml
+forge analyze --db final.sqlite --experiment-id final-v1 \
+  --rule final-rule.toml --out report.md
+```
 
-A manifest uses flat TOML keys: `experiment_id`, `phase` (`pilot` or `final`),
-`db`, `tasks`, `conditions`, `trials_per_condition`, `seed`, `agent`,
-`max_total_runs`, and `max_total_tokens`. Add `skill` and optional `skill_id`
-when using the skill condition. For `agent = "cmd"`, set `argv`; for
-`agent = "codex"`, set `model` and `reasoning_effort`, with optional
-`codex_bin` and `codex_auth`.
+Analysis computes task-level baseline/skill pass-rate differences and a
+task-clustered bootstrap interval. The first final analysis is stored
+immutably; later calls must reproduce it exactly.
 
-Before a final-phase run, freeze the manifest, benchmark, skill, rule, and
-analysis source with `forge freeze MANIFEST.toml --db runs.sqlite --rule RULE.toml`
-(the same DB named in the manifest). Final runs require a matching freeze;
-pilot runs do not.
+- **PROMOTE**: the lower confidence bound exceeds the minimum effect and all
+  health and cost guardrails pass.
+- **REJECT**: adequate healthy data place the effect below the promotion
+  threshold, or an otherwise qualifying effect violates a guardrail.
+- **INCONCLUSIVE**: health, completeness, sample size, interval position, or
+  data integrity prevents either decision.
 
-`forge analyze --db runs.sqlite --experiment-id ID [--rule RULE.toml] [--out report.md]`
-prints a task-paired baseline-versus-skill effect, task-clustered 95% bootstrap
-interval, telemetry, health checks, guardrails, and a reasoned verdict. Defaults
-are 10,000 bootstrap samples and seed 12345; override with `--bootstrap-samples`
-and `--analysis-seed`. Pilot reports are marked development data, not evidence.
-Final analysis requires the same rule and source hashes frozen before the run;
-its first stored result is immutable and later invocations verify recomputation.
+The precommitted V1 rule and held-out package are in
+[`benchmarks/final`](benchmarks/final/README.md). A no-agent walkthrough using
+the recorded database is in [the CLI demonstration](docs/DEMO.md).
 
-The v1 rule defaults are a 3 percentage-point minimum effect, at most 25% more
-median tokens, no analyzed task dropping over 40 points, under 5% crashes in
-each condition, at most 5 points of final infrastructure-error imbalance, and
-at least 10 tasks with 3 valid trials per condition. Final infrastructure errors
-are excluded from success-rate denominators; missing telemetry does not exclude
-outcomes. Forge V1 cannot measure regression of previously-passing tests and
-does not implement a regression-rate guardrail.
+## Security And Scope
 
-For pytest graders, Forge also restores pytest configuration, conftest files,
-and test modules. For unittest graders, it restores test modules, Python startup
-hooks, and modules that shadow the standard library. The grader command must
-exit 0 for solved, 1 for not solved, and any other code is `grader_error`;
-this follows pytest exit-code conventions.
+Forge provides experimental isolation, not a hardened security boundary. An
+agent that knows the canonical repository path can read it. A process that
+creates a new session may escape process-group cleanup. Codex sandboxing limits
+writes but can still permit reads from the real home directory. Exact copied
+credential strings are redacted when detected, but encoded or transformed
+secrets may evade detection; credential rotation in the temporary home can
+also invalidate the real login.
 
-Isolation limits: an agent that knows the canonical repository path can still
-access it directly. A child that creates a new process session can escape
-process-group cleanup.
+Forge V1 evaluates specified post-run behavior only. It does not measure
+regressions of tests that already passed, semantic code quality beyond the
+grader, external validity to large repositories, or adversaries with knowledge
+of host paths. These limits are part of the reported result, not footnotes to
+it.
